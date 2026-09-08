@@ -36,7 +36,7 @@ description: 新加坡 ACS、RDS MySQL 和 OSS 的项目独立部署
 ## 当前部署记录
 
 - 应用已部署到 `aigc` 命名空间，正式入口为 `https://aigc.juxplay.com`；默认关闭公开注册，管理员可在后台创建团队账号。
-- 当前发布参数见 `deploy/acs/release.env`。镜像由 Actions 工作流 `34202448616` 构建，amd64、arm64 均通过，GHCR 可见性为 private。
+- 当前发布参数见 `deploy/acs/release.env`。JuxFlow 品牌版本对应提交 `8e7874c`，镜像由 Actions 工作流 `34218102296` 构建，amd64、arm64 均通过，GHCR 可见性为 private。
 - 数据卷：`d-t4n6ouqfqt26vatvyx9i`，20 GiB ESSD PL1，挂载设备 `/dev/vdb`，PV 回收策略为 Retain。
 - 新 HTTPS 监听：`lsn-06vyo5hzcuaxt9c9rp`，已读取确认请求和空闲超时均为 300 秒。新 Host 路由优先级为 1，HTTP 返回 308 跳转；原 80 监听和原网站路由保留。
 - ECS 运维目录：`/opt/aigc-deploy`。`acme` 保存证书账户和续期配置，`tls` 保存证书，`reload-tls.sh` 更新 TLS Secret；`/etc/cron.d/aigc-acme` 每日执行续期检查。
@@ -47,6 +47,8 @@ description: 新加坡 ACS、RDS MySQL 和 OSS 的项目独立部署
 
 ## 已完成验收
 
+- JuxFlow 更新已完成：健康接口、首页、画布列表、登录、管理入口及导演台返回 200，首页和导演台引用的 39 个 JS/CSS 资源均可访问。Chrome 中确认首页及画布列表显示 JuxFlow，原有画布名称保留，公共导航和导演台无项目 GitHub 按钮；已检查的线上脚本中无版本入口和上游版本请求地址。
+- 本次更新前图片、音频、视频任务均为空，数据库及数据目录已备份并通过 SHA256 校验；备份目录为 `/opt/aigc-deploy/backups/20260908T105906Z`，其中 `image.txt` 保存旧镜像。Recreate 切换期间出现短暂 503，恢复后新 Pod 为 1/1、重启次数为 0；原 `app.juxplay.com`、`admin.juxplay.com` 的 HTTP 响应状态、长度和内容摘要保持一致。
 - 首页、画布、登录、管理入口及页面引用的静态资源正常，Chrome 可打开画布；未登录画布的文本节点刷新后保留。
 - 管理员与普通账号登录正常；较大画布及超过 64 KiB 的图片历史、素材 JSON 保存后，由独立登录会话完整读回。数据库实际字段类型为 LONGTEXT。
 - OSS 图片、视频、音频及中文文件名上传下载正常；Range 请求返回 206、正确的 Content-Range 和对应字节；容量统计、删除、密钥脱敏及留空保存沿用通过。
