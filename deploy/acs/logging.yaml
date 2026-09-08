@@ -1,0 +1,49 @@
+apiVersion: log.alibabacloud.com/v1alpha1
+kind: AliyunLogConfig
+metadata:
+  name: aigc-stdout
+  namespace: aigc
+spec:
+  project: k8s-log-cd356e7479ef0425b88695aa0bcf70b17
+  logstore: aigc-stdout
+  shardCount: 1
+  lifeCycle: 7
+  logtailConfig:
+    inputType: plugin
+    configName: aigc-stdout
+    inputDetail:
+      plugin:
+        inputs:
+          - type: service_docker_stdout
+            detail:
+              Stdout: true
+              Stderr: true
+              K8sNamespaceRegex: ^aigc$
+              K8sContainerRegex: ^app$
+              IncludeK8sLabel:
+                app: aigc
+---
+apiVersion: log.alibabacloud.com/v1alpha1
+kind: AliyunLogConfig
+metadata:
+  name: aigc-ai-calls
+  namespace: aigc
+spec:
+  project: k8s-log-cd356e7479ef0425b88695aa0bcf70b17
+  logstore: aigc-ai-calls
+  shardCount: 1
+  lifeCycle: 7
+  logtailConfig:
+    inputType: file
+    configName: aigc-ai-calls
+    inputDetail:
+      logType: common_reg_log
+      logPath: /app/data/logs/ai-calls
+      filePattern: "*.log"
+      dockerFile: true
+      advanced:
+        k8s:
+          K8sNamespaceRegex: ^aigc$
+          K8sContainerRegex: ^app$
+          IncludeK8sLabel:
+            app: aigc
