@@ -1,6 +1,6 @@
 ---
 title: 打赏支持
-description: 支持无限画布项目继续维护
+description: 支持 JuxFlow 项目继续维护
 ---
 
 # 打赏支持

@@ -42,7 +42,7 @@ export class CodexClient {
         this.child.on("error", (error) => this.close(error));
         this.child.on("exit", (code) => this.close(new Error("Codex 已退出：" + code)));
         this.ready = this.request("initialize", {
-            clientInfo: { name: "infinite-canvas", title: "Infinite Canvas", version: "0.1.0" },
+            clientInfo: { name: "infinite-canvas", title: "JuxFlow", version: "0.1.0" },
             capabilities: { experimentalApi: true, requestAttestation: false },
         }).then(() => this.write({ method: "initialized" }));
     }

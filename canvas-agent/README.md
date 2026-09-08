@@ -23,7 +23,7 @@ codex plugin marketplace add https://github.com/tigerowo/infinite-canvas.git
 codex plugin add canvas-agent@infinite-canvas
 ```
 
-安装后新建 Codex 对话，说“帮我打开并连接到 Infinite Canvas”。插件优先使用当前对话提供的画布地址或原画布标签；无法确定站点时再询问地址。
+安装后新建 Codex 对话，说“帮我打开并连接到 JuxFlow”。插件优先使用当前对话提供的画布地址或原画布标签；无法确定站点时再询问地址。
 
 插件市场定义在仓库根目录的 `.agents/plugins/marketplace.json`，指向仓库内的 `canvas-agent` 插件目录。市场名 `infinite-canvas` 仅为安装标识；插件由 GitHub 获取，MCP 和连接 Skill 通过 npx 使用 npm 上的服务，无需进入插件缓存安装依赖。
 

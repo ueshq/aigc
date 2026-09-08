@@ -19,7 +19,7 @@ description: 新加坡 ACS、RDS MySQL 和 OSS 的项目独立部署
 
 1. 通过 `intl-singapore` 配置操作云资源。集群 API 仅开放内网，从同 VPC 的 ECS 运维入口操作，先保存现有 AlbConfig、Ingress 及本项目部署配置。
 2. 使用仓库 Docker image 工作流构建镜像，记录完整 digest。镜像保持私有，给 `aigc/ghcr-pull` 配置具备 `read:packages` 的拉取凭据。
-3. 根据 `deploy/acs/secrets.env.example` 在仓库外生成受限配置文件，将其导入 `aigc/aigc-secrets`；密钥不得进入 Git、镜像或命令输出。
+3. 根据 `deploy/acs/secrets.env.example` 在项目的 `.env/` 目录生成受限配置文件，将其导入 `aigc/aigc-secrets`；该目录已被 Git 和 Docker 构建忽略，密钥不得进入 Git、镜像或命令输出。
 4. 将 `deploy/acs/app.yaml` 的 `__AIGC_IMAGE__` 替换为 `ghcr.io/ueshq/aigc@sha256:实际摘要` 后应用。不要使用 latest。等待 `/api/health` 和数据库初始化成功。
 5. 配置管理员统一 OSS，并确认站点上传下载。复用原 `alb` IngressClass；在原 AlbConfig 增加 HTTPS 443 监听，保留 HTTP 80，新增监听的请求及空闲超时设为 300 秒。
 6. ECS 使用 acme.sh 的阿里云 DNS-01 签发并自动续期 `aigc.juxplay.com`，通过受限 Kubernetes 凭据更新 `aigc-tls`。应用 `deploy/acs/ingress.yaml`，再配置 `aigc` CNAME 指向原 ALB。
@@ -43,7 +43,7 @@ description: 新加坡 ACS、RDS MySQL 和 OSS 的项目独立部署
 - `renew-kubeconfig` 使用 `tls-renewer` ServiceAccount，只能读取和更新 `aigc-tls`；已验证不能读取 `aigc-secrets`。DNS RAM 凭证只允许查询域名及管理 `juxplay.com` 的解析记录。
 - SLS 项目内新增 `aigc-stdout`、`aigc-ai-calls` 两个 Logstore，各 1 个分片、保留 7 天；配置见 `deploy/acs/logging.yaml`。
 - Prometheus 已启用 `aigc-unavailable`、`aigc-restarts`、`aigc-memory-high`、`aigc-data-disk-high`，实际规则保存在 `deploy/acs/alerts.json`。磁盘规则使用已核实的 `/dev/vdb` 容量指标；更改挂载结构后应复核设备标签。
-- 管理员、数据库、JWT、OSS 和 DNS 凭据保存在部署电脑的 `~/.config/aigc-deploy/credentials.json`，权限为 0600，不在仓库中。
+- 管理员、数据库、JWT、OSS 和 DNS 凭据保存在部署电脑的项目目录 `.env/credentials.json`，部署记录副本为 `.env/aliyun-acs.md`。目录权限为 0700，文件权限为 0600，均不纳入 Git 或 Docker 构建。
 
 ## 已完成验收
 
@@ -61,8 +61,8 @@ description: 新加坡 ACS、RDS MySQL 和 OSS 的项目独立部署
 
 ## 待完成的外部配置与人工验收
 
-- GHCR 当前使用已获授权的 GitHub CLI 凭证，包含 `read:packages` 和原有 `repo` 等权限。需替换为只包含 `read:packages` 的专用 classic token；将其保存到部署电脑的 `~/.config/aigc-deploy/ghcr-read-token` 后再更新 `ghcr-pull`。
-- RDS API 创建的普通账号已经只授予 `aigc` 业务库，但 ReadWrite 模板还附带全局 PROCESS、复制权限及系统表查询权限。精确最小权限尚未完成；用现有 RDS 高权限账号执行 `deploy/acs/database-grants.sql`，或提供受限的 `~/.config/aigc-deploy/mysql-admin.cnf` 后执行。不要重置共享实例已有账号的密码。
+- GHCR 当前使用已获授权的 GitHub CLI 凭证，包含 `read:packages` 和原有 `repo` 等权限。需替换为只包含 `read:packages` 的专用 classic token；将其保存到项目的 `.env/ghcr-read-token` 后再更新 `ghcr-pull`。
+- RDS API 创建的普通账号已经只授予 `aigc` 业务库，但 ReadWrite 模板还附带全局 PROCESS、复制权限及系统表查询权限。精确最小权限尚未完成；用现有 RDS 高权限账号执行 `deploy/acs/database-grants.sql`，或提供受限的 `.env/mysql-admin.cnf` 后执行。不要重置共享实例已有账号的密码。
 - 当前没有模型渠道。真实聊天流、图片生成、视频任务轮询及模型侧拉取参考素材尚未验收，需在后台配置已有渠道后继续。
 - 现有告警中心没有通知策略。四条告警规则已启用，但邮件、钉钉等接收人尚未配置，不能视为通知链路已经通过。
 - 独立登录会话的同步 API 已通过；第二台真实设备的浏览器同步和视频拖动播放仍需人工确认。备份文件已生成，尚未进行独立恢复演练。

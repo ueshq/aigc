@@ -8,7 +8,7 @@
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
-    "displayName": "无限画布",
+    "displayName": "JuxFlow",
     "shortDescription": "使用 Codex 操作当前连接的画布。",
     "longDescription": "自动启动并连接本地 Agent，通过同一个 MCP 服务调用网页已有画布工具，读取节点、编辑内容并触发生成。",
     "developerName": "Infinite Canvas",

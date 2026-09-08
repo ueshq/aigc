@@ -119,8 +119,8 @@ export default function IndexPage() {
         }
         setSubmitting(true);
         const titles = new Set(useCanvasStore.getState().projects.map(({ title }) => title));
-        let title = "无限画布";
-        for (let i = 1; titles.has(title); i++) title = `无限画布 ${i}`;
+        let title = "JuxFlow";
+        for (let i = 1; titles.has(title); i++) title = `JuxFlow ${i}`;
         const projectId = createProject(title, {
             agentConfig,
             pendingAgentRequest: { prompt: text, assets: pendingAssets.filter((asset) => referenceIds.includes(asset.nodeId)), skills: selectedSkills },

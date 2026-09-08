@@ -1,6 +1,6 @@
 ---
 name: open-canvas
-description: 打开、连接或操作 Infinite Canvas 画布；未连接时启动本地 Agent 并自动传入连接信息，已连接时直接调用画布 MCP 工具。
+description: 打开、连接或操作 JuxFlow 画布；未连接时启动本地 Agent 并自动传入连接信息，已连接时直接调用画布 MCP 工具。
 ---
 
 # 打开、连接和操作画布

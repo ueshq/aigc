@@ -37,9 +37,9 @@ export function CanvasCodexConnectView({ agent, onChat }: {
             </div>
             <div className="space-y-2 px-3 py-2.5">
                 <h3 className="text-sm font-medium">方式一：在 Codex 中使用插件</h3>
-                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>安装本项目的 Infinite Canvas 插件后，让 Codex 打开并连接画布。插件会启动本地 Agent，并自动带入连接信息。</p>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>安装本项目的 JuxFlow 插件后，让 Codex 打开并连接画布。插件会启动本地 Agent，并自动带入连接信息。</p>
                 {commandBlock(pluginCommand)}
-                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>安装插件后新建 Codex 对话，说“帮我打开并连接到 Infinite Canvas”。</p>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>安装插件后新建 Codex 对话，说“帮我打开并连接到 JuxFlow”。</p>
             </div>
             <div className="space-y-2 rounded-lg border px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                 <div className="text-xs font-medium">Codex 插件提醒</div>
