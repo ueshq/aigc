@@ -1,6 +1,6 @@
 package model
 
-// StorageObject 存储对象（S3/R2、WebDAV 共用文件索引）。
+// StorageObject 存储对象（S3/R2、WebDAV、OSS 共用文件索引）。
 type StorageObject struct {
 	ID         string `json:"id" gorm:"primaryKey"`
 	ProviderID string `json:"providerId" gorm:"index"`

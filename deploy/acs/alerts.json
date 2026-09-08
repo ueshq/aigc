@@ -1,0 +1,38 @@
+{
+  "region": "ap-southeast-1",
+  "clusterId": "cd356e7479ef0425b88695aa0bcf70b17",
+  "rules": [
+    {
+      "AlertId": 3503622,
+      "AlertName": "aigc-data-disk-high",
+      "Expression": "max(container_fs_usage_bytes{namespace=\"aigc\",device=\"/dev/vdb\",id=\"/\"} / container_fs_limit_bytes{namespace=\"aigc\",device=\"/dev/vdb\",id=\"/\"}) > 0.8",
+      "Duration": "5m",
+      "Message": "aigc 数据卷使用率连续 5 分钟超过 80%，请清理过期参考素材或扩容 PVC。",
+      "Status": 1
+    },
+    {
+      "AlertId": 3503621,
+      "AlertName": "aigc-memory-high",
+      "Expression": "max(container_memory_working_set_bytes{namespace=\"aigc\",container=\"app\"}) / 2147483648 > 0.9",
+      "Duration": "5m",
+      "Message": "aigc 应用内存连续 5 分钟超过 90%。",
+      "Status": 1
+    },
+    {
+      "AlertId": 3503620,
+      "AlertName": "aigc-restarts",
+      "Expression": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"aigc\",container=\"app\"}[15m])) > 3",
+      "Duration": "1m",
+      "Message": "aigc 应用 15 分钟内重启超过 3 次。",
+      "Status": 1
+    },
+    {
+      "AlertId": 3503619,
+      "AlertName": "aigc-unavailable",
+      "Expression": "(kube_deployment_status_replicas_available{namespace=\"aigc\",deployment=\"aigc\"} < 1) or absent(kube_deployment_status_replicas_available{namespace=\"aigc\",deployment=\"aigc\"})",
+      "Duration": "5m",
+      "Message": "aigc 应用连续 5 分钟没有可用副本，请检查 Pod 状态和 /api/health。",
+      "Status": 1
+    }
+  ]
+}
