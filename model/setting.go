@@ -11,6 +11,7 @@ const (
 
 	StorageProviderTypeS3     = "s3"
 	StorageProviderTypeWebDAV = "webdav"
+	StorageProviderTypeOSS    = "oss"
 )
 
 // ModelChannel 模型渠道配置。

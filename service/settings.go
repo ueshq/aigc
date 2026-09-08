@@ -947,7 +947,7 @@ func findSavedStorageProvider(provider model.StorageProvider, saved []model.Stor
 func validateEnabledStorageProviderTypes(providers []model.StorageProvider) error {
 	enabledType := ""
 	for _, provider := range providers {
-		if provider.Type != model.StorageProviderTypeS3 && provider.Type != model.StorageProviderTypeWebDAV {
+		if provider.Type != model.StorageProviderTypeS3 && provider.Type != model.StorageProviderTypeWebDAV && provider.Type != model.StorageProviderTypeOSS {
 			return safeMessageError{message: "存储类型不支持"}
 		}
 		if !provider.Enabled {
@@ -958,7 +958,7 @@ func validateEnabledStorageProviderTypes(providers []model.StorageProvider) erro
 			continue
 		}
 		if enabledType != provider.Type {
-			return safeMessageError{message: "S3/R2 与 WebDAV 不能同时启用"}
+			return safeMessageError{message: "不同类型的对象存储不能同时启用"}
 		}
 	}
 	return nil

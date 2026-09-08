@@ -601,9 +601,13 @@ export default function AdminSettingsPage() {
                                                 <Button icon={<PlusOutlined />} onClick={() => add(newAdminStorageProvider("webdav", storageProviders))}>
                                                     新增 WebDAV 配置
                                                 </Button>
+                                                <Button icon={<PlusOutlined />} onClick={() => add(newAdminStorageProvider("oss", storageProviders))}>
+                                                    新增阿里云 OSS 配置
+                                                </Button>
                                                 {fields.map((field) => {
                                                     const provider = storageProviders[field.name] || emptyS3StorageProvider;
                                                     const isWebDAV = provider.type === "webdav";
+                                                    const isOSS = provider.type === "oss";
                                                     const weightField = (
                                                         <Col xs={24} md={3}>
                                                             <Form.Item name={[field.name, "weight"]} label="权重">
@@ -615,7 +619,7 @@ export default function AdminSettingsPage() {
                                                         <Card
                                                             key={field.key}
                                                             size="small"
-                                                            title={isWebDAV ? "WebDAV" : "S3/R2"}
+                                                            title={isWebDAV ? "WebDAV" : isOSS ? "阿里云 OSS" : "S3/R2"}
                                                             extra={
                                                                 <Flex gap={8}>
                                                                     <Button size="small" loading={measuringProviderIndex === field.name} onClick={() => void measureStorageProviderAt(field.name)}>
@@ -631,19 +635,19 @@ export default function AdminSettingsPage() {
                                                             <Row gutter={12}>
                                                                 <Col xs={24} md={6}>
                                                                     <Form.Item name={[field.name, "name"]} label="名称">
-                                                                        <Input placeholder={isWebDAV ? "WebDAV" : "Cloudflare R2"} />
+                                                                        <Input placeholder={isWebDAV ? "WebDAV" : isOSS ? "阿里云 OSS" : "Cloudflare R2"} />
                                                                     </Form.Item>
                                                                 </Col>
                                                                 <Col xs={24} md={isWebDAV ? 8 : 6}>
                                                                     <Form.Item name={[field.name, "endpoint"]} label={isWebDAV ? "WebDAV 地址" : "Endpoint"}>
-                                                                        <Input placeholder={isWebDAV ? "https://dav.example.com/webdav" : "https://<account>.r2.cloudflarestorage.com"} />
+                                                                        <Input placeholder={isWebDAV ? "https://dav.example.com/webdav" : isOSS ? "https://oss-ap-southeast-1-internal.aliyuncs.com" : "https://<account>.r2.cloudflarestorage.com"} />
                                                                     </Form.Item>
                                                                 </Col>
                                                                 {!isWebDAV && (
                                                                     <>
                                                                         <Col xs={24} md={4}>
                                                                             <Form.Item name={[field.name, "region"]} label="Region">
-                                                                                <Input placeholder="auto" />
+                                                                                <Input placeholder={isOSS ? "ap-southeast-1" : "auto"} />
                                                                             </Form.Item>
                                                                         </Col>
                                                                         <Col xs={24} md={4}>
@@ -1055,13 +1059,13 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
 }
 
 function normalizeStorageProvider(item: Partial<AdminStorageProvider> = {}): AdminStorageProvider {
-    const type = item.type === "webdav" ? "webdav" : "s3";
+    const type = item.type === "webdav" || item.type === "oss" ? item.type : "s3";
     return {
         ...(type === "webdav" ? emptyWebDAVStorageProvider : emptyS3StorageProvider),
         ...item,
         id: item.id || "",
         type,
-        region: type === "s3" ? item.region || "auto" : "",
+        region: type === "webdav" ? "" : item.region || (type === "oss" ? "ap-southeast-1" : "auto"),
         weight: Math.max(1, Number(item.weight) || 1),
         enabled: item.enabled !== false,
         capacityBytes: Number(item.capacityBytes) || 0,
@@ -1074,6 +1078,8 @@ function newAdminStorageProvider(type: AdminStorageProvider["type"], providers: 
     const template = type === "webdav" ? emptyWebDAVStorageProvider : emptyS3StorageProvider;
     return {
         ...template,
+        type,
+        region: type === "oss" ? "ap-southeast-1" : template.region,
         enabled: !providers.some((provider) => provider.enabled && provider.type !== type),
     };
 }

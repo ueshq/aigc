@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aigc
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: aigc-essd
+provisioner: diskplugin.csi.alibabacloud.com
+parameters:
+  type: cloud_essd
+  performanceLevel: PL1
+  fsType: ext4
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aigc-data
+  namespace: aigc
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: aigc-essd
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aigc-config
+  namespace: aigc
+data:
+  STORAGE_DRIVER: mysql
+  PUBLIC_BASE_URL: https://aigc.juxplay.com
+  API_BASE_URL: http://127.0.0.1:8080
+  AI_LOG_DIR: /app/data/logs/ai-calls
+  PROMPT_DATA_DIR: /app/data/prompts
+  JWT_EXPIRE_HOURS: "168"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aigc
+  namespace: aigc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: aigc
+  template:
+    metadata:
+      labels:
+        app: aigc
+        alibabacloud.com/compute-class: general-purpose
+        alibabacloud.com/compute-qos: default
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 300
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: app
+          image: __AIGC_IMAGE__
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: aigc-config
+            - secretRef:
+                name: aigc-secrets
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: aigc-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigc
+  namespace: aigc
+spec:
+  selector:
+    app: aigc
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

@@ -6,7 +6,7 @@ type VideoGenerationLog struct {
 	TaskID      string `json:"taskId" gorm:"index"`
 	VideoID     string `json:"videoId" gorm:"index"`
 	Status      string `json:"status" gorm:"index"`
-	PayloadJSON string `json:"payloadJson" gorm:"type:text"`
+	PayloadJSON string `json:"payloadJson"`
 	CreatedAt   string `json:"createdAt" gorm:"index;index:idx_video_generation_logs_user_deleted_created,priority:3"`
 	UpdatedAt   string `json:"updatedAt" gorm:"index"`
 	DeletedAt   string `json:"deletedAt" gorm:"index;index:idx_video_generation_logs_user_deleted_created,priority:2"`
@@ -18,7 +18,7 @@ type ImageGenerationLog struct {
 	TaskID      string `json:"taskId" gorm:"index"`
 	ImageID     string `json:"imageId" gorm:"index"`
 	Status      string `json:"status" gorm:"index"`
-	PayloadJSON string `json:"payloadJson" gorm:"type:text"`
+	PayloadJSON string `json:"payloadJson"`
 	CreatedAt   string `json:"createdAt" gorm:"index;index:idx_image_generation_logs_user_deleted_created,priority:3"`
 	UpdatedAt   string `json:"updatedAt" gorm:"index"`
 	DeletedAt   string `json:"deletedAt" gorm:"index;index:idx_image_generation_logs_user_deleted_created,priority:2"`

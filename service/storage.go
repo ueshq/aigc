@@ -495,6 +495,8 @@ func DownloadStorageObject(id string, rangeHeader string) (DownloadedStorageObje
 			stream, readErr = getS3ObjectStream(provider, object.ObjectKey, rangeHeader)
 		case model.StorageProviderTypeWebDAV:
 			stream, readErr = getWebDAVObjectStream(provider, object.ObjectKey, object.Bytes, rangeHeader)
+		case model.StorageProviderTypeOSS:
+			stream, readErr = getOSSObjectStream(provider, object.ObjectKey, rangeHeader)
 		}
 		if readErr == nil && stream.Body != nil {
 			return downloadedStorageObject(object, stream), nil
@@ -610,6 +612,8 @@ func storageProviderConfigured(provider model.StorageProvider) bool {
 	switch provider.Type {
 	case model.StorageProviderTypeS3:
 		return provider.Bucket != "" && provider.AccessKeyID != "" && provider.SecretAccessKey != ""
+	case model.StorageProviderTypeOSS:
+		return provider.Region != "" && provider.Bucket != "" && provider.AccessKeyID != "" && provider.SecretAccessKey != ""
 	case model.StorageProviderTypeWebDAV:
 		return provider.Username != "" && provider.Password != ""
 	default:
@@ -623,6 +627,8 @@ func putStorageObject(provider model.StorageProvider, objectKey string, contentT
 		return putS3Object(provider, objectKey, contentType, data)
 	case model.StorageProviderTypeWebDAV:
 		return putWebDAVObject(provider, objectKey, data)
+	case model.StorageProviderTypeOSS:
+		return putOSSObject(provider, objectKey, contentType, data)
 	default:
 		return errors.New("存储类型不支持")
 	}
@@ -634,6 +640,8 @@ func deleteStorageObjectData(provider model.StorageProvider, objectKey string) e
 		return deleteS3Object(provider, objectKey)
 	case model.StorageProviderTypeWebDAV:
 		return deleteWebDAVObject(provider, objectKey)
+	case model.StorageProviderTypeOSS:
+		return deleteOSSObject(provider, objectKey)
 	default:
 		return errors.New("存储类型不支持")
 	}
@@ -645,6 +653,8 @@ func measureStorageProvider(provider model.StorageProvider) (int64, error) {
 		return measureS3Provider(provider)
 	case model.StorageProviderTypeWebDAV:
 		return measureWebDAVProvider(provider)
+	case model.StorageProviderTypeOSS:
+		return measureOSSProvider(provider)
 	default:
 		return 0, errors.New("存储类型不支持")
 	}

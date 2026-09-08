@@ -423,3 +423,7 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `admin_adjust` | 后台手动调整 |
 | `ai_consume` | 调用后端模型接口消费 |
 | `ai_refund` | 后端模型接口调用失败返还 |
+
+## 大 JSON 字段容量
+
+用户配置与同步数据、图片/视频成果的 `payload_json` 和工作流 `data` 使用 GORM 字符串的方言默认长文本类型，MySQL 对应 LONGTEXT，SQLite/PostgreSQL 对应 TEXT；不显式指定 MySQL TEXT，以免超过 64 KiB 的 JSON 保存失败。画布 `project_data` 同样沿用默认长文本类型。

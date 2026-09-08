@@ -246,7 +246,7 @@ export type AdminPublicSettings = {
 export type AdminStorageProvider = {
     id: string;
     name: string;
-    type: "s3" | "webdav";
+    type: "s3" | "webdav" | "oss";
     endpoint: string;
     region: string;
     bucket: string;
