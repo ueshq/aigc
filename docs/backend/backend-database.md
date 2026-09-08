@@ -429,3 +429,5 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 用户名、邀请码和对象存储键的唯一索引字段显式限定为 191 个字符，保证 MySQL utf8mb4 可以直接创建唯一索引。
 
 用户配置与同步数据、图片/视频成果的 `payload_json` 和工作流 `data` 使用 GORM 字符串的方言默认长文本类型，MySQL 对应 LONGTEXT，SQLite/PostgreSQL 对应 TEXT；不显式指定 MySQL TEXT，以免超过 64 KiB 的 JSON 保存失败。画布 `project_data` 同样沿用默认长文本类型。
+
+生成任务和 AI 调用日志的请求体、响应体及视频最近响应同样使用方言默认长文本，以容纳含参考图的请求和较大模型响应。
