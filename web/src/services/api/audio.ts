@@ -72,13 +72,16 @@ function refreshRemoteUser(config: AiConfig) {
     if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
 }
 
-export function fetchGrokTtsVoices(config: AiConfig, model: string) {
+export function fetchGrokTtsVoices(config: AiConfig, model: string, previewLocalChannel = false) {
     const requestConfig = { ...config, model, audioModel: model };
-    const requestKey = `${aiApiUrl(requestConfig, "/tts/voices")}|${channelIdForActiveModel(requestConfig)}|${model}`;
+    const draftChannel = previewLocalChannel && config.channelMode === "local" ? localChannelForActiveModel(requestConfig) : null;
+    const url = draftChannel ? buildApiUrl(draftChannel.baseUrl, "/tts/voices") : aiApiUrl(requestConfig, "/tts/voices");
+    const headers = draftChannel ? { Authorization: `Bearer ${draftChannel.apiKey}`, "Content-Type": "application/json" } : aiHeaders(requestConfig);
+    const requestKey = `${url}|${model}|${JSON.stringify(headers)}`;
     const existing = grokTtsVoiceRequests.get(requestKey);
     if (existing) return existing;
 
-    const request = axios.get<{ voices?: GrokTtsVoice[] }>(aiApiUrl(requestConfig, "/tts/voices"), { headers: aiHeaders(requestConfig), params: { model } })
+    const request = axios.get<{ voices?: GrokTtsVoice[] }>(url, { headers, params: { model } })
         .then((response) => Array.isArray(response.data.voices) ? response.data.voices.filter((voice) => Boolean(voice.voice_id)) : [])
         .finally(() => grokTtsVoiceRequests.delete(requestKey));
     grokTtsVoiceRequests.set(requestKey, request);

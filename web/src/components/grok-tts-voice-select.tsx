@@ -14,9 +14,10 @@ type GrokTtsVoiceSelectProps = {
     value: string;
     onChange: (value: string) => void;
     enabled?: boolean;
+    previewLocalChannel?: boolean;
 };
 
-export function GrokTtsVoiceSelect({ config, model, value, onChange, enabled = true }: GrokTtsVoiceSelectProps) {
+export function GrokTtsVoiceSelect({ config, model, value, onChange, enabled = true, previewLocalChannel = false }: GrokTtsVoiceSelectProps) {
     const configRef = useRef(config);
     const token = useUserStore((state) => state.token);
     const [voices, setVoices] = useState<GrokTtsVoice[]>([]);
@@ -28,14 +29,15 @@ export function GrokTtsVoiceSelect({ config, model, value, onChange, enabled = t
     const requestConfig = { ...config, model, audioModel: model };
     const channelId = channelIdForActiveModel(requestConfig);
     const localChannel = localChannelForActiveModel(requestConfig);
-    const requestKey = `${config.channelMode}|${channelId}|${model}|${localChannel?.baseUrl || config.baseUrl}|${token}`;
+    const requestKey = `${config.channelMode}|${channelId}|${model}|${localChannel?.baseUrl || config.baseUrl}|${token}|${previewLocalChannel ? localChannel?.apiKey || config.apiKey : ""}`;
 
     useEffect(() => {
+        setVoices([]);
+        setError("");
+        setLoading(enabled);
         if (!enabled) return;
         let active = true;
-        setLoading(true);
-        setError("");
-        void fetchGrokTtsVoices(configRef.current, model)
+        void fetchGrokTtsVoices(configRef.current, model, previewLocalChannel)
             .then((items) => {
                 if (active) setVoices(items);
             })
@@ -48,7 +50,7 @@ export function GrokTtsVoiceSelect({ config, model, value, onChange, enabled = t
         return () => {
             active = false;
         };
-    }, [enabled, model, reload, requestKey]);
+    }, [enabled, model, previewLocalChannel, reload, requestKey]);
 
     const options = voices.map((voice) => ({ value: voice.voice_id, label: voice.name || voice.voice_id }));
     if (value && !options.some((item) => item.value === value)) options.unshift({ value, label: value });

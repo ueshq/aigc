@@ -7,7 +7,7 @@ import { App } from "antd";
 
 import { fetchUserConfig } from "@/services/api/user-config";
 import { defaultUserStorageProvider, defaultUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider } from "@/services/image-storage";
-import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -41,16 +41,17 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (!token || !user?.id) return;
+        const initialConfig = useConfigStore.getState().config;
+        let canceled = useConfigStore.getState().isConfigOpen;
+        const unsubscribe = useConfigStore.subscribe((state) => {
+            if (state.isConfigOpen || state.config !== initialConfig) canceled = true;
+        });
         void fetchUserConfig(token)
             .then((payload) => {
+                if (canceled || useUserStore.getState().token !== token) return;
                 const syncS3 = payload.modelConfig?.syncStorageConfig === true;
                 const syncWebDAV = payload.modelConfig?.syncWebDAVStorageConfig === true;
-                if (payload.modelConfig) {
-                    Object.entries(payload.modelConfig)
-                        .forEach(([key, value]) => updateConfig(key as keyof AiConfig, value as never));
-                }
-                updateConfig("syncStorageConfig", syncS3);
-                updateConfig("syncWebDAVStorageConfig", syncWebDAV);
+                useConfigStore.getState().replaceConfig({ ...initialConfig, ...payload.modelConfig, syncStorageConfig: syncS3, syncWebDAVStorageConfig: syncWebDAV });
                 if (syncS3 && payload.storageProvider?.s3) {
                     saveUserStorageProvider({
                         ...defaultUserStorageProvider(),
@@ -66,8 +67,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     });
                 }
             })
-            .catch(() => {});
-    }, [token, updateConfig, user?.id]);
+            .catch(() => {})
+            .finally(unsubscribe);
+        return () => {
+            canceled = true;
+            unsubscribe();
+        };
+    }, [token, user?.id]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
