@@ -109,16 +109,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-本地非 Docker 开发运行：
-```bash
-cp .env.example .env
-go run .
+本地前端开发（连接远端后端，在仓库根目录执行）：
 
-# 另开一个终端窗口
-cd web
-bun install
-bun run dev
+```bash
+pnpm install
+cp web/.env.example web/.env.development.local
+pnpm dev
 ```
+
+首次复制配置；已有文件时仅补充 `API_BASE_URL`，不要覆盖。访问 `http://localhost:3000`，默认连接 `https://aigc.juxplay.com`，以后直接运行 `pnpm dev`。本地后端启动及联调说明见 [本地开发](docs/backend/local-development.md)。
 
 本地源码构建运行：
 

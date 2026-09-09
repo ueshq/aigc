@@ -1,0 +1,8 @@
+{
+    "name": "juxflow",
+    "private": true,
+    "packageManager": "pnpm@11.9.0",
+    "scripts": {
+        "dev": "pnpm --dir web dev"
+    }
+}
