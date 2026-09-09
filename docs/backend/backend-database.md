@@ -260,7 +260,6 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `prompt` | text | 提示词 |
 | `generation_type` | string | `generation` 或 `edit` |
 | `image_url` | text | 完成后图片 URL或第一张图片 URL |
-| `image_urls` | JSON | 完成后全部图片 URL，第一项与 `image_url` 一致 |
 | `storage_key` | string | 存储对象 key |
 | `error` | text | 失败摘要 |
 | `error_detail` | text | 失败详情 |
@@ -375,7 +374,7 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 协议，支持 OpenAI、Gemini、Grok2API、MiniMax、APIMart、KIE、MiMo |
+| `protocol` | string | 协议，支持 OpenAI、Gemini、MiniMax、MiMo |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | 渠道接口地址 |
 | `apiKey` | string | 渠道密钥 |

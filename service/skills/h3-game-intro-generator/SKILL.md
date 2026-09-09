@@ -5,6 +5,17 @@ description: 面向想制作双人合作游戏主菜单或开场动画的用户�
 
 # Co-op Game Intro Generator
 
+## MiniMax 官方渠道约束
+
+沿用当前全局视频模型选择规则，Agent 不自动切换模型。MiniMax 官方协议为 `minimax`，地址为 `https://api.minimax.io`。
+
+- `MiniMax-H3`：768P / 2K，单段 4–15 秒，支持文生、首帧、首尾帧和多模态参考。
+- `MiniMax-H3-Max`：480P / 768P，单段 5–15 秒，只支持文生、首帧和首尾帧；普通图片、视频、音频参考均不可用。需要这些参考时提示用户移除，或由用户在设置中选择 H3，不自动改模或丢弃素材。
+- 默认 768P、5 秒；文生默认 16:9，首尾帧使用 adaptive，参考生成默认 adaptive。尾帧必须搭配首帧；首尾帧不能和普通参考素材混用。
+- H3 最多参考图片 9 张、视频 3 个、音频 3 个，视频和音频各总计最多 15 秒；参考音频可单独提供。提示词必填且最多 7000 字符，长片拆分后每段仍遵守当前模型时长下限。
+- 调用沿用应用视频任务与轮询接口；参数依据 [官方创建文档](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)。
+
+
 Use this Skill when the user wants a co-op game intro video and wants to confirm the visual direction with one image before generating the final video. The workflow collects style, player names, game title, and optional character refs, then creates a framework-preserving confirmation image before generating with the currently configured global video model. Minimax H3 is preferred, but the Agent cannot select or switch models by itself.
 
 ## Required References

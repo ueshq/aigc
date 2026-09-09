@@ -1,11 +1,11 @@
+import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
+import { normalizeVideoConfig } from "@/lib/video-model-capabilities";
+import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/media";
 import type { ChatCompletionMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
-import type { ReferenceImage } from "@/types/image";
-import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import type { VideoElementItem, VideoElementReference, VideoMultiPromptItem } from "@/stores/use-config-store";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
-import { isCanvasImageNodeType } from "../utils/canvas-panorama";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "../types";
+import { PANORAMA_IMAGE_SIZE, isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
 export type NodeGenerationContext = {
@@ -15,8 +15,6 @@ export type NodeGenerationContext = {
     lastFrame: ReferenceImage | null;
     referenceVideos: ReferenceVideo[];
     referenceAudios: ReferenceAudio[];
-    videoMultiPrompt: VideoMultiPromptItem[];
-    videoElementList: VideoElementItem[];
     textCount: number;
     imageCount: number;
     videoCount: number;
@@ -40,28 +38,24 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         return buildComposerGenerationContext(inputs, prompt, sourceNode);
     }
 
-    const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
     const upstreamText = sourceNode?.metadata?.excludeUpstreamText? "": inputs
-            .filter((input) => !advanced.textNodeIds.has(input.nodeId))
             .map((input) => input.text)
             .filter(Boolean)
             .join("\n\n");
-    const referenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
-    const referenceVideos = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
-    const referenceAudios = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
+    const referenceImages = inputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
+    const referenceVideos = inputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
+    const referenceAudios = inputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
     const frameReferences = readFrameReferences(sourceNode, inputs);
     const frameNodeIds = new Set([frameReferences.firstFrame?.id, frameReferences.lastFrame?.id].filter((id): id is string => Boolean(id)));
     const effectiveReferenceImages = referenceImages.filter((image) => !frameNodeIds.has(image.id));
 
     return {
         prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
-        referenceImages: [...advanced.klingImageReferences, ...effectiveReferenceImages],
+        referenceImages: effectiveReferenceImages,
         firstFrame: frameReferences.firstFrame,
         lastFrame: frameReferences.lastFrame,
         referenceVideos,
         referenceAudios,
-        videoMultiPrompt: advanced.videoMultiPrompt,
-        videoElementList: advanced.videoElementList,
         textCount: inputs.filter((input) => input.type === "text").length,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
@@ -70,7 +64,6 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 }
 
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, sourceNode?: CanvasNodeData): NodeGenerationContext {
-    const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationInput[] = [];
     const labelByNodeId = new Map<string, string>();
@@ -85,7 +78,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
         hasToken = true;
         nextPrompt += prompt.slice(lastIndex, match.index);
         const input = inputByNodeId.get(match[1]);
-        if (input && !advanced.textNodeIds.has(input.nodeId) && !advanced.referenceNodeIds.has(input.nodeId)) {
+        if (input) {
             let label = labelByNodeId.get(input.nodeId);
             if (!label) {
                 label = generationLabel(input.type, counts[input.type]++);
@@ -100,9 +93,9 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 
     nextPrompt += prompt.slice(lastIndex);
     if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
-    const referenceImages = selectedInputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
-    const referenceVideos = selectedInputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
-    const referenceAudios = selectedInputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
+    const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
+    const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
+    const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
     const frameReferences = readFrameReferences(sourceNode, inputs);
     const frameNodeIds = new Set([frameReferences.firstFrame?.id, frameReferences.lastFrame?.id].filter((id): id is string => Boolean(id)));
     const effectiveReferenceImages = referenceImages.filter((image) => !frameNodeIds.has(image.id));
@@ -110,13 +103,11 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     if (!hasToken) {
         return {
             prompt,
-            referenceImages: advanced.klingImageReferences,
+            referenceImages: [],
             firstFrame: frameReferences.firstFrame,
             lastFrame: frameReferences.lastFrame,
             referenceVideos: [],
             referenceAudios: [],
-            videoMultiPrompt: advanced.videoMultiPrompt,
-            videoElementList: advanced.videoElementList,
             textCount: 0,
             imageCount: 0,
             videoCount: 0,
@@ -126,68 +117,16 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 
     return {
         prompt: nextPrompt,
-        referenceImages: [...advanced.klingImageReferences, ...effectiveReferenceImages],
+        referenceImages: effectiveReferenceImages,
         firstFrame: frameReferences.firstFrame,
         lastFrame: frameReferences.lastFrame,
         referenceVideos,
         referenceAudios,
-        videoMultiPrompt: advanced.videoMultiPrompt,
-        videoElementList: advanced.videoElementList,
         textCount: counts.text,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
     };
-}
-
-type CanvasVideoAdvancedContext = {
-    textNodeIds: Set<string>;
-    referenceNodeIds: Set<string>;
-    klingImageReferences: ReferenceImage[];
-    videoMultiPrompt: VideoMultiPromptItem[];
-    videoElementList: VideoElementItem[];
-};
-
-function buildCanvasVideoAdvancedContext(sourceNode: CanvasNodeData | undefined, inputs: NodeGenerationInput[]): CanvasVideoAdvancedContext {
-    const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
-    const textNodeIds = new Set<string>();
-    const referenceNodeIds = new Set<string>();
-    const klingImageReferences = (sourceNode?.metadata?.klingImageNodeIds || [])
-        .map((nodeId) => {
-            referenceNodeIds.add(nodeId);
-            return inputByNodeId.get(nodeId)?.image || null;
-        })
-        .filter((image): image is ReferenceImage => Boolean(image));
-    const videoMultiPrompt = (sourceNode?.metadata?.klingMultiPrompt || [])
-        .map((item) => {
-            const nodeId = item.textNodeId || "";
-            const input = inputByNodeId.get(nodeId);
-            if (!nodeId || input?.type !== "text" || !input.text) return null;
-            textNodeIds.add(nodeId);
-            return { prompt: input.text, duration: item.duration || "1" };
-        })
-        .filter((item): item is VideoMultiPromptItem => Boolean(item));
-    const videoElementList = (sourceNode?.metadata?.klingElementList || [])
-        .slice(0, 3)
-        .map((item) => {
-            const references = (item.nodeIds || [])
-                .slice(0, 4)
-                .map((nodeId) => {
-                    referenceNodeIds.add(nodeId);
-                    return inputToElementReference(inputByNodeId.get(nodeId));
-                })
-                .filter((reference): reference is VideoElementReference => Boolean(reference));
-            return references.length ? { name: item.name || "", description: item.description || "", references } : null;
-        })
-        .filter((item): item is VideoElementItem => Boolean(item));
-    return { textNodeIds, referenceNodeIds, klingImageReferences, videoMultiPrompt, videoElementList };
-}
-
-function inputToElementReference(input: NodeGenerationInput | undefined): VideoElementReference | null {
-    if (input?.image) return { id: input.nodeId, kind: "image", name: input.image.name, type: input.image.type, dataUrl: input.image.dataUrl, storageKey: input.image.storageKey };
-    if (input?.video) return { id: input.nodeId, kind: "video", name: input.video.name, type: input.video.type, url: input.video.url, storageKey: input.video.storageKey, bytes: input.video.bytes, width: input.video.width, height: input.video.height, durationMs: input.video.durationMs };
-    if (input?.audio) return { id: input.nodeId, kind: "audio", name: input.audio.name, type: input.audio.type, url: input.audio.url, storageKey: input.audio.storageKey, durationMs: input.audio.durationMs };
-    return null;
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
@@ -246,6 +185,9 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
         name: `image-${node.id}.png`,
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
+        bytes: node.metadata.bytes,
+        width: node.metadata.naturalWidth,
+        height: node.metadata.naturalHeight,
         storageKey: node.metadata.storageKey,
     };
 }
@@ -269,7 +211,7 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
         height: node.metadata.naturalHeight,
-        durationMs: node.metadata.durationMs,
+        durationMs: node.metadata.seconds ? Number(node.metadata.seconds) * 1000 : node.metadata.durationMs,
     };
 }
 
@@ -281,6 +223,53 @@ function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
         type: node.metadata.mimeType || "audio/mpeg",
         url: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        bytes: node.metadata.bytes,
         durationMs: node.metadata.durationMs,
     };
+}
+
+export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasGenerationMode): AiConfig {
+    const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
+    const channelId = node?.metadata?.channelId || "";
+    const imageChannelId = mode === "image" ? channelId || config.imageChannelId : config.imageChannelId;
+    const videoChannelId = mode === "video" ? channelId || config.videoChannelId : config.videoChannelId;
+    const textChannelId = mode === "text" ? channelId || config.textChannelId : config.textChannelId;
+    const audioChannelId = mode === "audio" ? channelId || config.audioChannelId : config.audioChannelId;
+    const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || config.activeChannelId : config.activeChannelId;
+    const result: AiConfig = {
+        ...config,
+        model: mode === "text" ? resolveModelForCapability(config, node?.metadata?.model, "text") : node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        activeChannelId,
+        imageChannelId,
+        videoChannelId,
+        textChannelId,
+        audioChannelId,
+        quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
+        size: isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size),
+        videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
+        vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
+        videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
+        audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
+        audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
+        audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
+        audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
+        glmTtsVoice: node?.metadata?.glmTtsVoice || config.glmTtsVoice || defaultConfig.glmTtsVoice,
+        glmTtsFormat: node?.metadata?.glmTtsFormat || config.glmTtsFormat || defaultConfig.glmTtsFormat,
+        glmTtsSpeed: node?.metadata?.glmTtsSpeed || config.glmTtsSpeed || defaultConfig.glmTtsSpeed,
+        mimoTtsVoice: node?.metadata?.mimoTtsVoice || config.mimoTtsVoice || defaultConfig.mimoTtsVoice,
+        mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
+        mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
+        geminiTtsVoice: node?.metadata?.geminiTtsVoice || config.geminiTtsVoice || defaultConfig.geminiTtsVoice,
+        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+    };
+    return mode === "video" ? normalizeVideoConfig(result) : result;
+}
+
+
+export function videoConfigPatch(key: keyof AiConfig, value: string) {
+    if (key === "videoSeconds") return { seconds: value };
+    if (key === "videoGenerateAudio") return { generateAudio: value };
+    if (key === "videoWatermark") return { watermark: value };
+    return { [key]: value };
 }

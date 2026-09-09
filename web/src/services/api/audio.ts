@@ -1,13 +1,12 @@
+import { aiApiUrl, aiHeaders, usesAccountProxy, refreshRemoteUser } from "./ai-request";
+import { geminiActionUrl, geminiErrorMessage, isGeminiConfig, isGeminiTtsModel, geminiPcmBase64ToWav, normalizeGeminiTtsVoice } from "@/lib/gemini";
 import axios from "axios";
 import { nanoid } from "nanoid";
 
 import { audioMimeType, isGlmTtsModel, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
-import { isGrok2APITtsConfig, normalizeGrokTtsFormat, normalizeGrokTtsLanguage, normalizeGrokTtsSpeed, type GrokTtsVoice } from "@/lib/grok-tts";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
-import { geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
-import { geminiPcmBase64ToWav, normalizeGeminiTtsVoice } from "@/lib/gemini-tts";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceAudio } from "@/types/media";
 
@@ -32,61 +31,6 @@ export type CanvasAudioTaskOptions = { nodeId?: string; sourceId?: string; clien
 
 type MiMoAudioResponse = { choices?: Array<{ message?: { audio?: { data?: string } } }> };
 type GeminiAudioResponse = { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> } }>; error?: { message?: string }; promptFeedback?: { blockReason?: string } };
-const grokTtsVoiceRequests = new Map<string, Promise<GrokTtsVoice[]>>();
-
-function usesAccountProxy(config: AiConfig) {
-    const token = useUserStore.getState().token;
-    return config.channelMode === "remote" || (config.channelMode === "local" && Boolean(token));
-}
-
-function aiApiUrl(config: AiConfig, path: string) {
-    if (usesAccountProxy(config)) return `/api/v1${path}`;
-    const channel = localChannelForActiveModel(config);
-    return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
-}
-
-function aiHeaders(config: AiConfig) {
-    const token = useUserStore.getState().token;
-    if (config.channelMode === "remote") {
-        return {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(channelIdForActiveModel(config) ? { "X-Model-Channel-ID": channelIdForActiveModel(config) } : {}),
-            "Content-Type": "application/json",
-        };
-    }
-    if (token) {
-        return {
-            Authorization: `Bearer ${token}`,
-            ...(channelIdForActiveModel(config) ? { "X-User-Model-Channel-ID": channelIdForActiveModel(config) } : {}),
-            "Content-Type": "application/json",
-        };
-    }
-    if (isGeminiConfig(config)) return geminiDirectHeaders(config);
-    return {
-        Authorization: `Bearer ${localChannelForActiveModel(config)?.apiKey || config.apiKey}`,
-        "Content-Type": "application/json",
-    };
-}
-
-function refreshRemoteUser(config: AiConfig) {
-    if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
-}
-
-export function fetchGrokTtsVoices(config: AiConfig, model: string, previewLocalChannel = false) {
-    const requestConfig = { ...config, model, audioModel: model };
-    const draftChannel = previewLocalChannel && config.channelMode === "local" ? localChannelForActiveModel(requestConfig) : null;
-    const url = draftChannel ? buildApiUrl(draftChannel.baseUrl, "/tts/voices") : aiApiUrl(requestConfig, "/tts/voices");
-    const headers = draftChannel ? { Authorization: `Bearer ${draftChannel.apiKey}`, "Content-Type": "application/json" } : aiHeaders(requestConfig);
-    const requestKey = `${url}|${model}|${JSON.stringify(headers)}`;
-    const existing = grokTtsVoiceRequests.get(requestKey);
-    if (existing) return existing;
-
-    const request = axios.get<{ voices?: GrokTtsVoice[] }>(url, { headers, params: { model } })
-        .then((response) => Array.isArray(response.data.voices) ? response.data.voices.filter((voice) => Boolean(voice.voice_id)) : [])
-        .finally(() => grokTtsVoiceRequests.delete(requestKey));
-    grokTtsVoiceRequests.set(requestKey, request);
-    return request;
-}
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string, referenceAudio?: ReferenceAudio): Promise<Blob> {
     const model = (config.model || config.audioModel).trim();
@@ -101,7 +45,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, r
             const response = await axios.post<GeminiAudioResponse>(
                 usesAccountProxy(config) ? "/api/v1/audio/speech" : geminiActionUrl(channel?.baseUrl || config.baseUrl, model, "generateContent"),
                 body,
-                { headers: usesAccountProxy(config) ? aiHeaders(config) : geminiDirectHeaders(config) },
+                { headers: aiHeaders(config, "application/json") },
             );
             refreshRemoteUser(config);
             return decodeGeminiAudio(response.data);
@@ -109,13 +53,13 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, r
         if (isMimoTtsModel(model) && !usesAccountProxy(config)) {
             const format = normalizeMimoTtsFormat(config.mimoTtsFormat);
             const body = await buildMiMoNativeRequest(config, model, prompt, referenceAudio);
-            const response = await axios.post<MiMoAudioResponse>(aiApiUrl(config, "/chat/completions"), body, { headers: aiHeaders(config) });
+            const response = await axios.post<MiMoAudioResponse>(aiApiUrl(config, "/chat/completions"), body, { headers: aiHeaders(config, "application/json") });
             return decodeMiMoAudio(response.data, format);
         }
 
         const format = audioResponseFormat(config, model);
         const body = await buildAudioSpeechRequest(config, model, prompt, referenceAudio);
-        const response = await axios.post<Blob>(aiApiUrl(config, "/audio/speech"), body, { headers: aiHeaders(config), responseType: "blob" });
+        const response = await axios.post<Blob>(aiApiUrl(config, "/audio/speech"), body, { headers: aiHeaders(config, "application/json"), responseType: "blob" });
         await assertAudioBlob(response.data);
         refreshRemoteUser(config);
         return response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) });
@@ -157,7 +101,7 @@ export async function createCanvasAudioTask(config: AiConfig, prompt: string, op
 
     const response = await fetch("/api/v1/canvas/audio-tasks", {
         method: "POST",
-        headers: aiHeaders(config),
+        headers: aiHeaders(config, "application/json"),
         body: JSON.stringify({
             endpoint: "/audio/speech",
             nodeId: options.nodeId || "",
@@ -213,16 +157,6 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
             response_format: normalizeMimoTtsFormat(config.mimoTtsFormat),
         };
     }
-    if (isGrok2APITtsConfig(config, model)) {
-        return {
-            model,
-            input: prompt,
-            voice_id: config.grokTtsVoice || "eve",
-            language: normalizeGrokTtsLanguage(config.grokTtsLanguage),
-            output_format: { codec: normalizeGrokTtsFormat(config.grokTtsFormat) },
-            speed: Number(normalizeGrokTtsSpeed(config.grokTtsSpeed)),
-        };
-    }
 
     const instructions = config.audioInstructions.trim();
     return {
@@ -239,7 +173,6 @@ function audioResponseFormat(config: AiConfig, model: string) {
     if (isGeminiTtsModel(model) && isGeminiConfig(config, model)) return "wav";
     if (isGlmTtsModel(model)) return normalizeGlmTtsFormat(config.glmTtsFormat);
     if (isMimoTtsModel(model)) return normalizeMimoTtsFormat(config.mimoTtsFormat);
-    if (isGrok2APITtsConfig(config, model)) return normalizeGrokTtsFormat(config.grokTtsFormat);
     return normalizeAudioFormatValue(config.audioFormat);
 }
 
@@ -328,11 +261,6 @@ function decodeMiMoAudio(payload: MiMoAudioResponse, format: string) {
 function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
     if (config.channelMode !== "local") return;
-    if (!isMimoTtsModel(model) && !isGeminiConfig(config, model)) {
-        if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
-        if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
-        return;
-    }
     const channel = localChannelForActiveModel(config);
     if (!(channel?.baseUrl || config.baseUrl).trim()) throw new Error("请先配置 Base URL");
     if (!(channel?.apiKey || config.apiKey).trim()) throw new Error("请先配置 API Key");

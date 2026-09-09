@@ -50,19 +50,12 @@ export type CanvasNodeMetadata = {
     count?: number;
     seconds?: string;
     vquality?: string;
-    mode?: string;
-    negativePrompt?: string;
     generateAudio?: string;
-    characterOrientation?: string;
     watermark?: string;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;
     audioInstructions?: string;
-    grokTtsVoice?: string;
-    grokTtsLanguage?: string;
-    grokTtsFormat?: string;
-    grokTtsSpeed?: string;
     glmTtsVoice?: string;
     glmTtsFormat?: string;
     glmTtsSpeed?: string;
@@ -95,11 +88,6 @@ export type CanvasNodeMetadata = {
     videoTaskVideoId?: string;
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
-    multiShot?: string;
-    shotType?: string;
-    klingImageNodeIds?: string[];
-    klingMultiPrompt?: { textNodeId?: string; duration?: string }[];
-    klingElementList?: { name?: string; description?: string; nodeIds?: string[] }[];
     cameraControl?: CameraControlOptions;
     panoramaSourcePrompt?: string;
     panoramaFinalPrompt?: string;
@@ -159,7 +147,7 @@ export type CanvasAssistantReference = {
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string; assetId?: string; source?: "asset" | "library" }
     | { kind: "image"; dataUrl: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
-    | { kind: "video"; url: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
+    | { kind: "video"; url: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" }
     | { kind: "audio"; url: string; title: string; storageKey?: string; assetId?: string; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" };
 
 export type PendingAgentAsset = {

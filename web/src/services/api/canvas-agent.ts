@@ -1,6 +1,6 @@
 import { mimoTextModels } from "@/lib/mimo-tts";
-import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, isGeminiConfig } from "@/lib/gemini";
-import { aiApiUrl, aiHeaders, refreshRemoteUser } from "@/services/api/image";
+import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, isGeminiConfig } from "@/lib/gemini";
+import { aiApiUrl, aiHeaders, refreshRemoteUser, usesAccountProxy } from "@/services/api/ai-request";
 import { imageToDataUrl } from "@/services/image-storage";
 import { channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import type { CanvasAgentProtocolMessage, CanvasAgentToolCall, CanvasAgentToolMode } from "@/app/(user)/canvas/types";
@@ -322,12 +322,12 @@ async function requestGeminiCompletion(config: AiConfig, systemPrompt: string, m
         ...(jsonSchema ? { generationConfig: { responseFormat: { text: { mimeType: "application/json", schema: jsonSchema } } } } : {}),
     };
     applyCanvasAgentReasoning(body, config, "gemini");
-    const proxy = Boolean(aiApiUrl(config, "/chat/completions").startsWith("/api/"));
+    const proxy = usesAccountProxy(config);
     const channel = localChannelForActiveModel(config);
     const { model: _model, stream: _stream, ...nativeBody } = body;
     const response = await fetch(proxy ? aiApiUrl(config, "/chat/completions") : geminiActionUrl(channel?.baseUrl || config.baseUrl, config.model, "generateContent"), {
         method: "POST",
-        headers: proxy ? aiHeaders(config, "application/json") : geminiDirectHeaders(config),
+        headers: aiHeaders(config, "application/json"),
         body: JSON.stringify(proxy ? body : nativeBody),
         signal,
     });

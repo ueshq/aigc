@@ -30,7 +30,7 @@ import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Segmented, T
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel, imageSizeOptions } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel, imageSizeOptions } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
@@ -50,7 +50,7 @@ import { deleteImageGenerationLogs, fetchImageGenerationLogs, saveImageGeneratio
 import { deleteStoredImages, imageToDataUrl, resolveImageUrl, uploadImage, uploadRemoteImageToServer } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
-import type { ReferenceImage } from "@/types/image";
+import type { ReferenceImage } from "@/types/media";
 
 type GeneratedImage = {
     id: string;
@@ -842,12 +842,6 @@ export default function ImagePage() {
                         const nextLog = { ...log, status: "失败" as const, durationMs: Date.now() - log.createdAt, failCount: 1, errors: ["图片任务不存在或未创建成功"], errorDetails: ["后端没有找到对应的图片任务"], lastPolledAt: Date.now() };
                         await saveLog(nextLog);
                         setResults((value) => updateResultByLogId(value, log.id, { status: "failed", error: nextLog.errors[0], errorDetail: nextLog.errorDetails?.[0], durationMs: nextLog.durationMs, lastPolledAt: nextLog.lastPolledAt }));
-                        return;
-                    }
-                    if ((task.image_urls?.length || 0) > 1) {
-                        const nextLogs = imageLogsFromTask(log, task);
-                        await Promise.all(nextLogs.map(saveLog));
-                        setResults((value) => value.filter((item) => !imageResultMatchesLog(item, nextLogs[0])));
                         return;
                     }
 
@@ -2279,9 +2273,7 @@ function imageTaskIdentityKeys(task?: CanvasImageTask) {
 }
 
 function imageLogIdentityKeys(log: GenerationLog) {
-    const taskKeys = (log.task?.image_urls?.length || 0) > 1
-        ? []
-        : imageTaskIdentityKeys(log.task);
+    const taskKeys = imageTaskIdentityKeys(log.task);
     return uniqueStrings([
         log.id,
         ...taskKeys,
@@ -2450,38 +2442,6 @@ function mergeBackendImageTasks(logs: GenerationLog[], tasks: CanvasImageTask[],
         imageLogIdentityKeys(nextLog).forEach((key) => byKey.set(key, nextLog));
     });
     return dedupeGenerationLogs(nextLogs);
-}
-
-function imageLogsFromTask(log: GenerationLog, task: CanvasImageTask): GenerationLog[] {
-    const urls = uniqueStrings(task.image_urls || []);
-    if (urls.length <= 1) return [imageLogFromTask(log, task)];
-    const parentTaskId = task.parent_task_id || task.id;
-
-    return urls.map((url, index) => {
-        const nextLog = imageLogFromTask(
-            {
-                ...log,
-                id: index === 0 ? log.id : `${log.id}:${index}`,
-            },
-            {
-                ...task,
-                id: index === 0 ? task.id : `${parentTaskId}:${index}`,
-                parent_task_id: parentTaskId,
-                url,
-                image_url: url,
-                storageKey: undefined,
-                bytes: 0,
-            },
-        );
-
-        return {
-            ...nextLog,
-            images: nextLog.images.map((image) => ({
-                ...image,
-                id: index === 0 ? task.id : `${parentTaskId}:${index}`,
-            })),
-        };
-    });
 }
 
 function imageLogFromTask(log: GenerationLog, task: CanvasImageTask): GenerationLog {

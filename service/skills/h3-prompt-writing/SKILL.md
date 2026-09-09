@@ -1,14 +1,25 @@
 ---
 name: H3 官方默认 Skill
-description: 为 MiniMax H3 的五种视频生成模式（T2VA、I2VA、FL2VA、L2VA 和 Ref2VA）编写结构化的提示信息
+description: 为 MiniMax H3 的视频生成模式（T2VA、I2VA、FL2VA 和 Ref2VA；H3-Max 不支持 Ref2VA）编写结构化的提示信息
 compatibility: Portable to any agent that can read local files — no external API calls, MiniMax Hub tools, or proprietary runtime required. The agents/openai.yaml file only adds optional ChatGPT/Codex UI metadata; it does not restrict the skill to OpenAI agents.
 ---
 
 # H3 Prompt Writing
 
+## MiniMax 官方渠道约束
+
+沿用当前全局视频模型选择规则，Agent 不自动切换模型。MiniMax 官方协议为 `minimax`，地址为 `https://api.minimax.io`。
+
+- `MiniMax-H3`：768P / 2K，单段 4–15 秒，支持文生、首帧、首尾帧和多模态参考。
+- `MiniMax-H3-Max`：480P / 768P，单段 5–15 秒，只支持文生、首帧和首尾帧；普通图片、视频、音频参考均不可用。需要这些参考时提示用户移除，或由用户在设置中选择 H3，不自动改模或丢弃素材。
+- 默认 768P、5 秒；文生默认 16:9，首尾帧使用 adaptive，参考生成默认 adaptive。尾帧必须搭配首帧；首尾帧不能和普通参考素材混用。
+- H3 最多参考图片 9 张、视频 3 个、音频 3 个，视频和音频各总计最多 15 秒；参考音频可单独提供。提示词必填且最多 7000 字符，长片拆分后每段仍遵守当前模型时长下限。
+- 调用沿用应用视频任务与轮询接口；参数依据 [官方创建文档](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)。
+
+
 ## Workflow
 
-1. Identify the input mode: T2VA, I2VA, FL2VA, L2VA, or full-reference Ref2VA.
+1. Identify the input mode: T2VA, I2VA, FL2VA, or full-reference Ref2VA.
 2. For base text/keyframe modes, read `references/base-en.txt` and follow its final prompt structure.
 3. For full-reference mode, first apply the full-reference structure and shared rules in this file, then read `references/ref-en.txt` for the remaining reference-specific rules and complete example.
 4. Preserve the exact field names, section order, labels, and timing notation from the selected guide.
@@ -18,7 +29,6 @@ compatibility: Portable to any agent that can read local files — no external A
 - T2VA: build the full audiovisual timeline from text.
 - I2VA: start from the first frame and develop forward from it.
 - FL2VA: describe the continuous path between the first and last frames.
-- L2VA: infer a plausible opening and converge to the supplied last frame.
 
 Use `integrated_multimodal_description`, `overall_soundscape`, and `non_diegetic_music` in the order shown in `references/base-en.txt`.
 
@@ -32,7 +42,7 @@ Write all six rewrite sections in English. Preserve the original language only f
 
 **Description detail:** Make `detailed_description` as detailed and explicit as possible. For each shot, clearly establish the current composition, subject appearance and position, environment and lighting, actions and state changes, camera movement, current sound, and the points where referenced content actually appears or takes effect. Avoid reducing the description to a plot summary or a list of reference relationships.
 
-> The basic formats for shots, camera movement, speakers, dialogue, and ordinary sound are shared with the Video Prompt Writing Guide (T2VA / I2VA / FL2VA / L2VA). This guide focuses on the reference labels, analysis sections, and format differences specific to full-reference mode.
+> The basic formats for shots, camera movement, speakers, dialogue, and ordinary sound are shared with the Video Prompt Writing Guide (T2VA / I2VA / FL2VA). This guide focuses on the reference labels, analysis sections, and format differences specific to full-reference mode.
 
 ## 1. Overall Structure
 
@@ -49,7 +59,7 @@ A complete rewrite output consists of six sections in the following order:
 
 ### 5.1 Basic Format
 
-The basic format follows the Video Prompt Writing Guide (T2VA / I2VA / FL2VA / L2VA):
+The basic format follows the Video Prompt Writing Guide (T2VA / I2VA / FL2VA):
 
 - Write the body in English. Preserve the original language of dialogue, lyrics, and visible text.
 - `[Shot 1]` marks the opening shot and has no timestamp. Later shots use `[Shot N] At MM:SS.mmm, ...` to mark cut times.
@@ -57,11 +67,11 @@ The basic format follows the Video Prompt Writing Guide (T2VA / I2VA / FL2VA / L
 - Give vocal sources stable `(S1)`, `(S2)`, and subsequent IDs. Write dialogue and lyrics as `<d>[Language] ...</d>`.
 - Use `<scenetrans>`, `<cutoff>`, and the corresponding continuity descriptions for dialogue crossing a cut, speech truncated by the video ending, and continuous audio across shots.
 
-For complete rules and examples covering camera vocabulary, group speech, voice-over, dialogue across cuts, and visible text, see the Video Prompt Writing Guide (T2VA / I2VA / FL2VA / L2VA).
+For complete rules and examples covering camera vocabulary, group speech, voice-over, dialogue across cuts, and visible text, see the Video Prompt Writing Guide (T2VA / I2VA / FL2VA).
 
 ## 6. `overall_soundscape` and `non_diegetic_music`
 
-The definitions of these two sound categories follow the Video Prompt Writing Guide (T2VA / I2VA / FL2VA / L2VA).
+The definitions of these two sound categories follow the Video Prompt Writing Guide (T2VA / I2VA / FL2VA).
 
 `overall_soundscape` summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in `detailed_description`:
 
@@ -90,7 +100,7 @@ Write complete dialogue and lyrics only inside `<d>` in `detailed_description`; 
 - Describe each shot by composition, subjects, environment, actions, camera, sound, and the exact point where referenced content appears.
 - Avoid plot summaries, unresolved reference labels, and timing that does not match the requested duration.
 ## Tips for Better Results
-- Always match the total duration of the description to the requested video length (4–15 seconds).
+- Always match the total duration of the description to the requested video length (H3: 4–15 seconds; H3-Max: 5–15 seconds).
 - Keep reference labels consistent (e.g. `<Picture 1>`, `<Video 1>`, `<Audio 1>`) across every section.
 - Prefer concrete visual and audio details over abstract words like "cinematic" or "beautiful".
-- When using keyframes (I2VA / FL2VA / L2VA), clearly state how the first and/or last frame connects to the timeline.
+- When using keyframes (I2VA / FL2VA), clearly state how the first and/or last frame connects to the timeline.

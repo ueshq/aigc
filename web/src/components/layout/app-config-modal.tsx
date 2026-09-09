@@ -1,20 +1,20 @@
 "use client";
 
+import { isGeminiConfig, isGeminiTtsModel, geminiTtsVoiceOptions, normalizeGeminiTtsVoice } from "@/lib/gemini";
+import { miniMaxVideoCapabilities, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
+
 import { Alert, App, Button, Empty, Form, Input, Modal, Segmented, Select, Spin, Switch, type InputRef } from "antd";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ChannelModelSelectorModal } from "@/components/channel-model-selector-modal";
-import { GrokTtsVoiceSelect } from "@/components/grok-tts-voice-select";
 import { fetchImageModels } from "@/services/api/image";
 import { fetchUserConfig, measureUserStorageProvider, syncUserModelConfig, syncUserStorageProvider } from "@/services/api/user-config";
 import { clearStorageConfigCache as clearFileStorageCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageCache, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, loadStorageConfig, loadUserS3StorageProvider, loadUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider, type UserStorageProvider } from "@/services/image-storage";
 import { audioFormatOptions, audioVoiceOptions, glmTtsFormatOptions, glmTtsVoiceOptions, isGlmTtsModel, normalizeAudioSpeedValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
-import { grokTtsFormatOptions, grokTtsLanguageOptions, isGrok2APITtsConfig, normalizeGrokTtsFormat, normalizeGrokTtsLanguage, normalizeGrokTtsSpeed } from "@/lib/grok-tts";
-import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
-import { geminiTtsVoiceOptions, normalizeGeminiTtsVoice } from "@/lib/gemini-tts";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsFormatOptions, mimoTtsVoiceOptions } from "@/lib/mimo-tts";
+import { normalizeVideoConfig } from "@/lib/video-model-capabilities";
 import { modelChannelApiKeyUrls, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "@/lib/model-channel";
 import { filterChannelModelsByCapability, filterModelsByCapability, normalizeLocalChannels, resolveEffectiveConfig, useConfigStore, type AiConfig, type LocalModelChannel, type ModelCapability } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -100,8 +100,8 @@ export function AppConfigModal() {
     const modelSelectChannel = localChannels.find((channel) => channel.id === modelSelectChannelId);
     const audioChannel = defaultChannelFor(modelGroups[2]);
     const audioConfig = { ...modelConfig, model: modelConfig.audioModel, audioChannelId: audioChannel?.id || modelConfig.audioChannelId };
+    const miniMax = defaultChannelFor(modelGroups[1])?.protocol === "minimax" ? miniMaxVideoCapabilities(modelConfig.videoModel) : null;
     const glmTts = isGlmTtsModel(modelConfig.audioModel);
-    const grokTts = isGrok2APITtsConfig(audioConfig, modelConfig.audioModel);
     const geminiTts = isGeminiTtsModel(modelConfig.audioModel) && isGeminiConfig(audioConfig, modelConfig.audioModel);
     const dirty = Boolean(baseline && JSON.stringify({ config, userStorage, userWebDAVStorage }) !== JSON.stringify(baseline));
 
@@ -221,7 +221,13 @@ export function AppConfigModal() {
     const setDefaultModel = () => {
         if (!group || !selectedChannel || !availableModels.includes(candidateModel)) return;
         if (effectiveMode === "local" && !validateChannel(selectedChannel)) return;
-        setConfig((current) => ({ ...current, [group.modelKey]: candidateModel, [group.channelKey]: selectedChannel.id }));
+        setConfig((current) => {
+            const next = { ...current, [group.modelKey]: candidateModel, [group.channelKey]: selectedChannel.id };
+            if (group.capability !== "video") return next;
+            const effective = resolveEffectiveConfig(next, modelChannel, canUseRemoteChannel);
+            const video = normalizeVideoConfig({ ...effective, model: candidateModel, videoModel: candidateModel, size: next.videoSize });
+            return { ...next, vquality: video.vquality, videoSeconds: video.videoSeconds, videoSize: video.size, videoGenerateAudio: video.videoGenerateAudio };
+        });
     };
     const closeLocalModelSelector = () => {
         selectorSession.current++;
@@ -387,8 +393,13 @@ export function AppConfigModal() {
                                             <div className="mb-6 flex flex-wrap items-center gap-3"><Button disabled={savingConfig || isDefault || !availableModels.includes(candidateModel)} onClick={setDefaultModel}>{isDefault ? "已设为" + group.label + "默认" : "设为" + group.label + "默认"}</Button><span className={secondaryText}>保存后生效</span></div>
                                         </section> : <Empty className="py-8" description="当前类型暂无可用渠道" />}
                                         <section className="border-t border-[var(--ant-color-border-secondary)] pt-5">
-                                            <h3 className="mb-1 text-sm font-semibold">当前{group.label}默认{section === "image" || section === "audio" ? "参数" : "模型"}</h3>
+                                            <h3 className="mb-1 text-sm font-semibold">当前{group.label}默认{section === "image" || section === "audio" || section === "video" && miniMax ? "参数" : "模型"}</h3>
                                             <p className={"mb-4 break-all " + secondaryText}>{defaultChannelFor(group) ? `${defaultChannelFor(group)?.name} / ${modelConfig[group.modelKey]}` : "尚未配置可用的默认模型"}</p>
+                                            {section === "video" && miniMax ? <>
+                                                <Form.Item label="默认清晰度"><Select value={normalizeMiniMaxH3Resolution(config.vquality, modelConfig.videoModel)} options={miniMax.resolutions.map((value) => ({ value, label: value }))} onChange={(value) => updateConfig("vquality", value)} /></Form.Item>
+                                                <Form.Item label="默认时长（秒）"><Input type="number" min={miniMax.minSeconds} max={15} value={normalizeMiniMaxH3Duration(config.videoSeconds, modelConfig.videoModel)} onChange={(event) => updateConfig("videoSeconds", String(normalizeMiniMaxH3Duration(event.target.value, modelConfig.videoModel)))} /></Form.Item>
+                                                <Form.Item label="默认比例" extra="文生视频的自适应默认使用 16:9；首尾帧模式跟随首帧。"><Select value={normalizeMiniMaxH3Ratio(config.videoSize)} options={[...miniMaxRatioOptions]} onChange={(value) => updateConfig("videoSize", value)} /></Form.Item>
+                                            </> : null}
                                             {section === "image" ? <>
                                                 <Form.Item label="画布默认生图张数" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。"><Input type="number" min={1} max={15} value={config.canvasImageCount} onChange={(event) => updateConfig("canvasImageCount", event.target.value)} onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))} /></Form.Item>
                                                 <div className="space-y-3">
@@ -413,34 +424,29 @@ export function AppConfigModal() {
                                                         </Form.Item>
                                                     ) : isMimoTtsModel(modelConfig.audioModel) ? null : (
                                                         <Form.Item label="默认音频声音" className="mb-4">
-                                                            {grokTts ? <GrokTtsVoiceSelect config={audioConfig} model={modelConfig.audioModel} value={config.grokTtsVoice} enabled={isConfigOpen && Boolean(audioChannel) && (effectiveMode === "remote" || Boolean(audioChannel?.baseUrl.trim() && audioChannel?.apiKey.trim()))} previewLocalChannel onChange={(value) => updateConfig("grokTtsVoice", value)} /> : <Select value={glmTts ? normalizeGlmTtsVoice(config.glmTtsVoice) : config.audioVoice} options={glmTts ? glmTtsVoiceOptions : audioVoiceOptions} onChange={(value) => updateConfig(glmTts ? "glmTtsVoice" : "audioVoice", value)} />}
+                                                            <Select value={glmTts ? normalizeGlmTtsVoice(config.glmTtsVoice) : config.audioVoice} options={glmTts ? glmTtsVoiceOptions : audioVoiceOptions} onChange={(value) => updateConfig(glmTts ? "glmTtsVoice" : "audioVoice", value)} />
                                                         </Form.Item>
                                                     )}
-                                                    {grokTts ? (
-                                                        <Form.Item label="默认音频语言" className="mb-4">
-                                                            <Select value={normalizeGrokTtsLanguage(config.grokTtsLanguage)} options={grokTtsLanguageOptions} showSearch optionFilterProp="label" onChange={(value) => updateConfig("grokTtsLanguage", value)} />
-                                                        </Form.Item>
-                                                    ) : null}
                                                     {!geminiTts ? (
                                                         <Form.Item label="默认音频格式" className="mb-4">
-                                                            <Select value={isMimoTtsModel(modelConfig.audioModel) ? config.mimoTtsFormat : glmTts ? normalizeGlmTtsFormat(config.glmTtsFormat) : grokTts ? normalizeGrokTtsFormat(config.grokTtsFormat) : config.audioFormat} options={isMimoTtsModel(modelConfig.audioModel) ? [...mimoTtsFormatOptions] : glmTts ? glmTtsFormatOptions : grokTts ? grokTtsFormatOptions : audioFormatOptions} onChange={(value) => isMimoTtsModel(modelConfig.audioModel) ? updateConfig("mimoTtsFormat", value) : updateConfig(glmTts ? "glmTtsFormat" : grokTts ? "grokTtsFormat" : "audioFormat", value)} />
+                                                            <Select value={isMimoTtsModel(modelConfig.audioModel) ? config.mimoTtsFormat : glmTts ? normalizeGlmTtsFormat(config.glmTtsFormat) : config.audioFormat} options={isMimoTtsModel(modelConfig.audioModel) ? [...mimoTtsFormatOptions] : glmTts ? glmTtsFormatOptions : audioFormatOptions} onChange={(value) => isMimoTtsModel(modelConfig.audioModel) ? updateConfig("mimoTtsFormat", value) : updateConfig(glmTts ? "glmTtsFormat" : "audioFormat", value)} />
                                                         </Form.Item>
                                                     ) : null}
                                                     {!geminiTts && !isMimoTtsModel(modelConfig.audioModel) ? (
                                                         <Form.Item label="默认音频语速" className="mb-4">
                                                             <Input
                                                                 type="number"
-                                                                min={glmTts ? 0.5 : grokTts ? 0.7 : 0.25}
-                                                                max={glmTts ? 2 : grokTts ? 1.5 : 4}
+                                                                min={glmTts ? 0.5 : 0.25}
+                                                                max={glmTts ? 2 : 4}
                                                                 step={0.05}
-                                                                value={glmTts ? config.glmTtsSpeed : grokTts ? config.grokTtsSpeed : config.audioSpeed}
-                                                                onChange={(event) => updateConfig(glmTts ? "glmTtsSpeed" : grokTts ? "grokTtsSpeed" : "audioSpeed", event.target.value)}
-                                                                onBlur={(event) => updateConfig(glmTts ? "glmTtsSpeed" : grokTts ? "grokTtsSpeed" : "audioSpeed", glmTts ? normalizeGlmTtsSpeed(event.target.value) : grokTts ? normalizeGrokTtsSpeed(event.target.value) : normalizeAudioSpeedValue(event.target.value))}
+                                                                value={glmTts ? config.glmTtsSpeed : config.audioSpeed}
+                                                                onChange={(event) => updateConfig(glmTts ? "glmTtsSpeed" : "audioSpeed", event.target.value)}
+                                                                onBlur={(event) => updateConfig(glmTts ? "glmTtsSpeed" : "audioSpeed", glmTts ? normalizeGlmTtsSpeed(event.target.value) : normalizeAudioSpeedValue(event.target.value))}
                                                             />
                                                         </Form.Item>
                                                     ) : null}
                                                 </div>
-                                                {(!isMimoTtsModel(modelConfig.audioModel) || isMimoPresetTtsModel(modelConfig.audioModel) || isMimoVoiceCloneModel(modelConfig.audioModel)) && !glmTts && !grokTts ? (
+                                                {(!isMimoTtsModel(modelConfig.audioModel) || isMimoPresetTtsModel(modelConfig.audioModel) || isMimoVoiceCloneModel(modelConfig.audioModel)) && !glmTts ? (
                                                     <Form.Item label="默认音频指令" className="mb-4">
                                                         <Input.TextArea rows={2} value={config.audioInstructions} placeholder="例如：自然、温暖、适合旁白。" onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
                                                     </Form.Item>

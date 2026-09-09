@@ -1,4 +1,4 @@
-import type { ReferenceImage } from "@/types/image";
+import type { ReferenceImage } from "@/types/media";
 
 export function imageReferenceLabel(index: number) {
     return `图片${index + 1}`;

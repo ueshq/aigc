@@ -9,7 +9,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -74,25 +73,14 @@ func AIVideo(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
-	for _, adapter := range builtinAIProtocols {
-		if adapter.videoContent != nil && adapter.videoContent(w, r, id) {
-			return
-		}
+	if serveGeminiVideoTaskContent(w, r, id) {
+		return
 	}
 	proxyAIGetRequest(w, r, "/videos/"+id+"/content")
 }
 
 func AIAudioSpeech(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/audio/speech")
-}
-
-func AITTSVoices(w http.ResponseWriter, r *http.Request) {
-	modelName := strings.TrimSpace(r.URL.Query().Get("model"))
-	if modelName == "" {
-		Fail(w, "缺少模型名称")
-		return
-	}
-	proxyAIGetRequest(w, r, "/tts/voices?model="+url.QueryEscape(modelName))
 }
 
 func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -152,7 +140,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	prepared, _, err := prepareAIProtocolRequest(aiProtocolRequest{
+	prepared, err := prepareAIProtocolRequest(aiProtocolRequest{
 		mode: aiProtocolProxyRequest, body: body, contentType: contentType, modelName: modelName,
 		channel: channel, endpoint: path, path: upstreamPath,
 	})
@@ -244,7 +232,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 		return
 	}
 
-	if copyAIProtocolResponse(w, response, request, channel, logContext, onFailure) {
+	if copyMiMoTTSResponse(w, response, logContext, onFailure) {
 		return
 	}
 
@@ -485,17 +473,6 @@ func readAIRequestCount(body []byte, contentType string) int {
 	return count
 }
 
-func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string) string {
-	for _, adapter := range builtinAIProtocols {
-		if adapter.url != nil {
-			if resolved, ok := adapter.url(channel, modelName, path); ok {
-				return resolved
-			}
-		}
-	}
-	return service.BuildModelChannelURL(channel, path)
-}
-
 func agnesVideoQueryID(modelName string, path string) (string, bool) {
 	if !isAgnesVideoModel(modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
 		return "", false
@@ -505,17 +482,6 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 		return id, true
 	}
 	return "", false
-}
-
-func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
-	for _, adapter := range builtinAIProtocols {
-		if adapter.path != nil {
-			if resolved, ok := adapter.path(channel, modelName, path); ok {
-				return resolved
-			}
-		}
-	}
-	return path
 }
 
 func isCogVideoX3Model(modelName string) bool {

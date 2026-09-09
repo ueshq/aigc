@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { directAIProviderForProtocol, type DirectAIProvider, type ModelChannelProtocol } from "@/lib/model-channel";
+import { type ModelChannelProtocol } from "@/lib/model-channel";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
@@ -17,10 +17,6 @@ export type LocalModelChannel = {
     apiKey: string;
     models: string[];
 };
-
-export type VideoMultiPromptItem = { prompt: string; duration: string };
-export type VideoElementReference = { id: string; kind: "image" | "video" | "audio"; name: string; type: string; dataUrl?: string; url?: string; storageKey?: string; bytes?: number; width?: number; height?: number; durationMs?: number };
-export type VideoElementItem = { name: string; description: string; references: VideoElementReference[] };
 
 export type AiConfig = {
     channelMode: "remote" | "local";
@@ -35,10 +31,6 @@ export type AiConfig = {
     audioFormat: string;
     audioSpeed: string;
     audioInstructions: string;
-    grokTtsVoice: string;
-    grokTtsLanguage: string;
-    grokTtsFormat: string;
-    grokTtsSpeed: string;
     glmTtsVoice: string;
     glmTtsFormat: string;
     glmTtsSpeed: string;
@@ -47,16 +39,9 @@ export type AiConfig = {
     mimoVoiceDesignPrompt: string;
     geminiTtsVoice: string;
     videoSeconds: string;
-    videoMode: string;
-    videoNegativePrompt: string;
-    videoMultiShot: string;
-    videoShotType: string;
-    videoMultiPrompt: VideoMultiPromptItem[];
-    videoElementList: VideoElementItem[];
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
-    videoCharacterOrientation: string;
     systemPrompt: string;
     models: string[];
     imageModels: string[];
@@ -108,10 +93,6 @@ export const defaultConfig: AiConfig = {
     audioFormat: "mp3",
     audioSpeed: "1",
     audioInstructions: "",
-    grokTtsVoice: "eve",
-    grokTtsLanguage: "auto",
-    grokTtsFormat: "mp3",
-    grokTtsSpeed: "1",
     glmTtsVoice: "tongtong",
     glmTtsFormat: "wav",
     glmTtsSpeed: "1",
@@ -120,16 +101,9 @@ export const defaultConfig: AiConfig = {
     mimoVoiceDesignPrompt: "",
     geminiTtsVoice: "Kore",
     videoSeconds: "6",
-    videoMode: "std",
-    videoNegativePrompt: "",
-    videoMultiShot: "false",
-    videoShotType: "intelligence",
-    videoMultiPrompt: [{ prompt: "", duration: "1" }],
-    videoElementList: [{ name: "", description: "", references: [] }],
     vquality: "720",
     videoGenerateAudio: "false",
     videoWatermark: "false",
-    videoCharacterOrientation: "video",
     systemPrompt: "",
     models: [],
     imageModels: [],
@@ -429,10 +403,6 @@ export const useConfigStore = create<ConfigStore>()(
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
-                        grokTtsVoice: config.grokTtsVoice || defaultConfig.grokTtsVoice,
-                        grokTtsLanguage: config.grokTtsLanguage || defaultConfig.grokTtsLanguage,
-                        grokTtsFormat: config.grokTtsFormat || defaultConfig.grokTtsFormat,
-                        grokTtsSpeed: config.grokTtsSpeed || defaultConfig.grokTtsSpeed,
                         glmTtsVoice: config.glmTtsVoice || defaultConfig.glmTtsVoice,
                         glmTtsFormat: config.glmTtsFormat || defaultConfig.glmTtsFormat,
                         glmTtsSpeed: config.glmTtsSpeed || defaultConfig.glmTtsSpeed,
@@ -440,16 +410,9 @@ export const useConfigStore = create<ConfigStore>()(
                         systemPrompts: config.systemPrompts?.image ? config.systemPrompts : defaultConfig.systemPrompts,
                         audioInstructions: config.audioInstructions || "",
                         videoSeconds: config.videoSeconds || "6",
-                        videoMode: config.videoMode || "std",
-                        videoNegativePrompt: config.videoNegativePrompt || "",
-                        videoMultiShot: config.videoMultiShot || "false",
-                        videoShotType: config.videoShotType || "intelligence",
-                        videoMultiPrompt: Array.isArray(config.videoMultiPrompt) && config.videoMultiPrompt.length ? config.videoMultiPrompt : defaultConfig.videoMultiPrompt,
-                        videoElementList: Array.isArray(config.videoElementList) && config.videoElementList.length ? config.videoElementList : defaultConfig.videoElementList,
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "false",
                         videoWatermark: config.videoWatermark || "false",
-                        videoCharacterOrientation: config.videoCharacterOrientation === "image" ? "image" : "video",
                         canvasImageCount: config.canvasImageCount || "1",
                         imageModels: filterChannelModelsByCapability(localChannels, "image"),
                         videoModels: filterChannelModelsByCapability(localChannels, "video"),
@@ -551,10 +514,4 @@ export function channelProtocolForConfig(config: AiConfig): LocalModelChannel["p
         ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config)) || config.publicChannels[0]
         : localChannelForActiveModel(config);
     return channel?.protocol || "openai";
-}
-
-export type { DirectAIProvider } from "@/lib/model-channel";
-
-export function directAIProviderForConfig(config: AiConfig): DirectAIProvider | null {
-    return directAIProviderForProtocol(channelProtocolForConfig(config));
 }

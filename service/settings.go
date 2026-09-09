@@ -77,8 +77,11 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if err != nil {
 		return "", err
 	}
-	if adapter, ok := matchModelProtocol(modelConfigTestRules, resolved, modelName); ok {
-		return adapter.testModel(resolved, modelName)
+	if IsMiniMaxChannel(resolved) {
+		return "MiniMax H3 系列是异步视频模型，请在视频创作台测试生成。", nil
+	}
+	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
+		return testArkSeedanceChannelModel(resolved, modelName)
 	}
 	return testAdminChannelModel(resolved, modelName)
 }
@@ -317,10 +320,6 @@ func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
 	return &http.Client{Timeout: time.Duration(timeout) * time.Second}
 }
 
-func BuildModelChannelURL(channel model.ModelChannel, path string) string {
-	return modelProtocolForChannel(channel).buildURL(channel, path)
-}
-
 func buildOpenAIModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
 	lowerBaseURL := strings.ToLower(baseURL)
@@ -421,7 +420,7 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 
 func isVideoModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sd2.0 720p") || strings.Contains(name, "sd2.5 720p")
+	return IsMiniMaxH3ModelName(name) || strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sd2.0 720p") || strings.Contains(name, "sd2.5 720p")
 }
 
 func isImageModelName(modelName string) bool {
@@ -486,11 +485,6 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 	return resolved, nil
 }
 
-func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
-	adapter, _ := matchModelProtocol(modelDiscoveryRules, channel, "")
-	return adapter.models(channel)
-}
-
 func fetchOpenAIAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 	request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
 	if err != nil {
@@ -525,140 +519,20 @@ func fetchOpenAIAdminChannelModels(channel model.ModelChannel) ([]string, error)
 	return result, nil
 }
 
-func isKIEAdminChannel(channel model.ModelChannel) bool {
-	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
-	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
-	return protocol == "kie" || strings.Contains(baseURL, "kie.ai")
-}
-
-func kieMarketModels() []string {
-	return []string{
-		"bytedance/seedream",
-		"bytedance/seedream-v4-text-to-image",
-		"bytedance/seedream-v4-edit",
-		"seedream/4.5-text-to-image",
-		"seedream/4.5-edit",
-		"seedream/5-lite-text-to-image",
-		"seedream/5-lite-image-to-image",
-		"seedream/5-pro-text-to-image",
-		"seedream/5-pro-image-to-image",
-		"seedream/5-pro-layer-decomposition",
-		"z-image",
-		"nano-banana-2",
-		"nano-banana-2-lite",
-		"google/imagen4-fast",
-		"google/imagen4-ultra",
-		"google/imagen4",
-		"google/nano-banana-edit",
-		"google/nano-banana",
-		"nano-banana-pro",
-		"flux-2/pro-image-to-image",
-		"flux-2/pro-text-to-image",
-		"flux-2/flex-image-to-image",
-		"flux-2/flex-text-to-image",
-		"grok-imagine-image-2-0/text-to-image",
-		"grok-imagine/text-to-image",
-		"grok-imagine/image-to-image",
-		"gpt-image/1.5-text-to-image",
-		"gpt-image/1.5-image-to-image",
-		"gpt-image-2-text-to-image",
-		"gpt-image-2-image-to-image",
-		"topaz/image-upscale",
-		"recraft/remove-background",
-		"recraft/crisp-upscale",
-		"ideogram/character-edit",
-		"ideogram/character-remix",
-		"ideogram/character",
-		"ideogram/v3-text-to-image",
-		"ideogram/v3-edit",
-		"ideogram/v3-remix",
-		"qwen/text-to-image",
-		"qwen/image-to-image",
-		"qwen/image-edit",
-		"qwen2/image-edit",
-		"qwen2/text-to-image",
-		"wan/2-7-image",
-		"wan/2-7-image-pro",
-		"grok-imagine/text-to-video",
-		"grok-imagine/image-to-video",
-		"grok-imagine/upscale",
-		"grok-imagine/extend",
-		"grok-imagine-video-1-5-preview",
-		"minimax-h3/text-to-video",
-		"minimax-h3/image-to-video",
-		"minimax-h3/reference-to-video",
-		"kling-2.6/text-to-video",
-		"kling-2.6/image-to-video",
-		"kling/v2-5-turbo-image-to-video-pro",
-		"kling/v2-5-turbo-text-to-video-pro",
-		"kling/ai-avatar-standard",
-		"kling/ai-avatar-pro",
-		"kling/v2-1-master-image-to-video",
-		"kling/v2-1-master-text-to-video",
-		"kling/v2-1-pro",
-		"kling/v2-1-standard",
-		"kling-2.6/motion-control",
-		"kling-3.0/motion-control",
-		"kling-3.0/video",
-		"kling-3.0-omni/text-to-video",
-		"kling-3.0-omni/image-to-video",
-		"kling-3.0-omni/reference-to-video",
-		"kling-3.0-omni/transformation",
-		"kling/v3-turbo-text-to-video",
-		"kling/v3-turbo-image-to-video",
-		"bytedance/seedance-2",
-		"bytedance/seedance-2-fast",
-		"bytedance/seedance-2-mini",
-		"bytedance/seedance-1.5-pro",
-		"bytedance/v1-pro-fast-image-to-video",
-		"bytedance/v1-pro-image-to-video",
-		"bytedance/v1-pro-text-to-video",
-		"bytedance/v1-lite-image-to-video",
-		"bytedance/v1-lite-text-to-video",
-		"hailuo/2-3-image-to-video-pro",
-		"hailuo/2-3-image-to-video-standard",
-		"hailuo/02-text-to-video-pro",
-		"hailuo/02-image-to-video-pro",
-		"hailuo/02-text-to-video-standard",
-		"hailuo/02-image-to-video-standard",
-		"wan/2-2-a14b-image-to-video-turbo",
-		"wan/2-2-a14b-speech-to-video-turbo",
-		"wan/2-2-a14b-text-to-video-turbo",
-		"wan/2-2-animate-move",
-		"wan/2-2-animate-replace",
-		"wan/2-6-image-to-video",
-		"wan/2-6-text-to-video",
-		"wan/2-6-video-to-video",
-		"wan/2-6-flash-image-to-video",
-		"wan/2-6-flash-video-to-video",
-		"wan/2-5-image-to-video",
-		"wan/2-5-text-to-video",
-		"wan/2-7-text-to-video",
-		"wan/2-7-image-to-video",
-		"wan/2-7-videoedit",
-		"wan/2-7-r2v",
-		"topaz/video-upscale",
-		"infinitalk/from-audio",
-		"happyhorse/text-to-video",
-		"happyhorse/image-to-video",
-		"happyhorse/reference-to-video",
-		"happyhorse/video-edit",
-		"happyhorse-1-1/text-to-video",
-		"happyhorse-1-1/image-to-video",
-		"happyhorse-1-1/reference-to-video",
-		"happyhorse-1-1/text-to-video",
-		"happyhorse-1-1/image-to-video",
-		"happyhorse-1-1/reference-to-video",
-		"gemini-omni-video",
-	}
-}
-
 func testAdminChannelModel(channel model.ModelChannel, modelName string) (string, error) {
 	if strings.TrimSpace(modelName) == "" {
 		return "", errors.New("缺少模型名称")
 	}
-	adapter, _ := matchModelProtocol(modelGenerationTestRules, channel, modelName)
-	return adapter.testModel(channel, modelName)
+	switch {
+	case strings.EqualFold(strings.TrimSpace(modelName), "glm-tts"):
+		return testGLMTTSChannelModel(channel, modelName)
+	case IsMiMoTTSModelName(modelName):
+		return testMiMoTTSChannelModel(channel, modelName)
+	case IsGeminiChannel(channel):
+		return testGeminiChannelModel(channel, modelName)
+	default:
+		return testOpenAIChannelModel(channel, modelName)
+	}
 }
 
 func testOpenAIChannelModel(channel model.ModelChannel, modelName string) (string, error) {

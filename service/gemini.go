@@ -33,10 +33,6 @@ func BuildGeminiChannelURL(channel model.ModelChannel, path string) string {
 	return baseURL + path
 }
 
-func SetModelChannelAuthHeader(request *http.Request, channel model.ModelChannel) {
-	modelProtocolForChannel(channel).setAuth(request, channel)
-}
-
 func StripGeminiModelField(body []byte, contentType string) ([]byte, error) {
 	if !strings.HasPrefix(strings.ToLower(contentType), "application/json") {
 		return body, nil

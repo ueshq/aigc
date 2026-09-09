@@ -1,6 +1,5 @@
-import type { AiConfig } from "@/stores/use-config-store";
-import type { ReferenceImage } from "@/types/image";
-import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 
 export const SEEDANCE_REFERENCE_LIMITS = {
     images: 9,
@@ -72,8 +71,8 @@ const seedancePixels = {
     },
 } as const;
 
-export function isSeedanceVideoConfig(config: Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
-    return isSeedanceVideoModel(config.model || config.videoModel) || isArkPlanBaseUrl(config.baseUrl);
+export function isSeedanceVideoConfig(config: AiConfig) {
+    return isSeedanceVideoModel(config.model || config.videoModel) || isArkPlanBaseUrl(localChannelForActiveModel(config)?.baseUrl || config.baseUrl);
 }
 
 export function isSeedanceVideoModel(model: string) {

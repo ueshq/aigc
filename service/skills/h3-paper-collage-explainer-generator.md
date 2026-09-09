@@ -7,6 +7,17 @@ trigger-words: [paper collage explainer, paper-collage animation, halftone colla
 
 # 纸拼贴讲解动画生成器
 
+## MiniMax 官方渠道约束
+
+沿用当前全局视频模型选择规则，Agent 不自动切换模型。MiniMax 官方协议为 `minimax`，地址为 `https://api.minimax.io`。
+
+- `MiniMax-H3`：768P / 2K，单段 4–15 秒，支持文生、首帧、首尾帧和多模态参考。
+- `MiniMax-H3-Max`：480P / 768P，单段 5–15 秒，只支持文生、首帧和首尾帧；普通图片、视频、音频参考均不可用。需要这些参考时提示用户移除，或由用户在设置中选择 H3，不自动改模或丢弃素材。
+- 默认 768P、5 秒；文生默认 16:9，首尾帧使用 adaptive，参考生成默认 adaptive。尾帧必须搭配首帧；首尾帧不能和普通参考素材混用。
+- H3 最多参考图片 9 张、视频 3 个、音频 3 个，视频和音频各总计最多 15 秒；参考音频可单独提供。提示词必填且最多 7000 字符，长片拆分后每段仍遵守当前模型时长下限。
+- 调用沿用应用视频任务与轮询接口；参数依据 [官方创建文档](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)。
+
+
 将一句口播、一个故事主题、观点句或抽象概念，转化为统一的编辑感纸拼贴动画序列。视觉语言是高级半调纸拼贴：大色块纸面、黑白半调照片剪影、选择性彩色卡纸点缀、暖白描边、柔和纸影、触感定格组装，以及清晰的拼贴音效。
 
 这个 Skill 使用当前画布的 `generate_image`、`edit_image`、`generate_video`、`generate_audio`、`create_text_node` 和 `create_group`。触感拼贴音效只通过当前视频模型真实支持的原生音频生成；`generate_audio` 只用于朗读旁白或口播，不能生成 BGM 或音效。它优先保证风格连续、色彩统一、纸张质感可控、定格拼贴节奏清楚，并明确默认不添加 BGM、旁白口播和字幕，除非用户要求。当前没有音乐生成、视频拼接或音轨混合工具，不得声称已经完成最终合成。

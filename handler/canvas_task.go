@@ -271,8 +271,7 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 		saveFailedCanvasImageTask(task, message, string(payload))
 		return
 	}
-	collectAll := allAIProtocolImageResults(task.Model)
-	imageURLs, mimeType, bytes, err := imageURLsFromAIResponse(payload, responseContentType, collectAll, task.Endpoint == "/chat/completions")
+	imageURL, mimeType, bytes, err := imageURLFromAIResponse(payload, responseContentType, task.Endpoint == "/chat/completions")
 	if err != nil {
 		saveFailedCanvasImageTask(task, err.Error(), string(payload))
 		return
@@ -281,10 +280,7 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Progress = 100
 	task.CompletedAt = taskTime()
 	task.ResponseBody = string(payload)
-	task.ImageURL = imageURLs[0]
-	if collectAll {
-		task.ImageURLs = imageURLs
-	}
+	task.ImageURL = imageURL
 	task.StorageKey = ""
 	task.MimeType = mimeType
 	task.Bytes = bytes
@@ -547,47 +543,25 @@ func imageBytesFromAIResponse(payload []byte) ([]byte, string, error) {
 	return nil, "", errors.New("图片接口没有返回图片")
 }
 
-func imageURLsFromAIResponse(payload []byte, contentType string, collectAll bool, includeChatImages bool) ([]string, string, int64, error) {
+func imageURLFromAIResponse(payload []byte, contentType string, includeChatImages bool) (string, string, int64, error) {
 	candidates, err := imageCandidatesFromAIResponse(payload, contentType, includeChatImages)
 	if err != nil {
-		return nil, "", 0, err
+		return "", "", 0, err
 	}
-	urls := make([]string, 0, len(candidates))
-	seen := map[string]bool{}
-	firstMimeType := ""
-	var firstBytes int64
 	for _, candidate := range candidates {
-		url := candidate
-		mimeType := ""
-		var bytes int64
-		if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
-			data, detectedMimeType, err := imageCandidateBytes(candidate)
-			if err != nil || len(data) == 0 {
-				continue
-			}
-			mimeType = detectedMimeType
-			bytes = int64(len(data))
-			if !strings.HasPrefix(candidate, "data:image/") {
-				url = "data:" + mimeType + ";base64," + candidate
-			}
+		if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
+			return candidate, "", 0, nil
 		}
-		if seen[url] {
+		data, mimeType, err := imageCandidateBytes(candidate)
+		if err != nil || len(data) == 0 {
 			continue
 		}
-		seen[url] = true
-		urls = append(urls, url)
-		if len(urls) == 1 {
-			firstMimeType = mimeType
-			firstBytes = bytes
+		if !strings.HasPrefix(candidate, "data:image/") {
+			candidate = "data:" + mimeType + ";base64," + candidate
 		}
-		if !collectAll {
-			return urls, firstMimeType, firstBytes, nil
-		}
+		return candidate, mimeType, int64(len(data)), nil
 	}
-	if len(urls) == 0 {
-		return nil, "", 0, errors.New("图片接口没有返回图片")
-	}
-	return urls, firstMimeType, firstBytes, nil
+	return "", "", 0, errors.New("图片接口没有返回图片")
 }
 
 type serverSentJSONEvent struct {

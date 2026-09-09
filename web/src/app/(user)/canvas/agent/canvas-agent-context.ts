@@ -1,5 +1,5 @@
+import { buildGenerationConfig } from "../components/canvas-node-generation";
 import { isGlmTtsModel } from "@/lib/audio-generation";
-import { isGrok2APITtsConfig } from "@/lib/grok-tts";
 import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
 import { supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-store";
@@ -49,7 +49,6 @@ export type CanvasAgentContext = {
         videoGenerateAudio: string;
         videoSupportsAudio: boolean;
         audioVoice: string;
-        audioLanguage: string;
         audioFormat: string;
         audioSpeed: string;
     };
@@ -101,7 +100,7 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
     const includedIds = new Set(orderedNodes.map((node) => node.id));
     const videoModel = input.config.videoModel || input.config.model;
     const audioModel = input.config.audioModel;
-    const grokTts = isGrok2APITtsConfig({ ...input.config, model: audioModel }, audioModel);
+    const videoConfig = buildGenerationConfig(input.config, undefined, "video");
 
     return {
         project: {
@@ -122,16 +121,15 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
             audioModel,
             imageQuality: input.config.quality,
             imageSize: input.config.size,
-            videoQuality: input.config.vquality,
-            videoSize: input.config.videoSize,
+            videoQuality: videoConfig.vquality,
+            videoSize: videoConfig.size,
             imageCount: input.config.canvasImageCount || input.config.count,
-            videoSeconds: input.config.videoSeconds,
-            videoGenerateAudio: input.config.videoGenerateAudio,
+            videoSeconds: videoConfig.videoSeconds,
+            videoGenerateAudio: videoConfig.videoGenerateAudio,
             videoSupportsAudio: supportsVideoAudioGeneration(videoModel, channelProtocolForConfig({ ...input.config, model: videoModel, videoModel })),
-            audioVoice: isGeminiTtsModel(audioModel) && isGeminiConfig({ ...input.config, model: audioModel }, audioModel) ? input.config.geminiTtsVoice : isGlmTtsModel(audioModel) ? input.config.glmTtsVoice : grokTts ? input.config.grokTtsVoice : input.config.audioVoice,
-            audioLanguage: grokTts ? input.config.grokTtsLanguage : "",
-            audioFormat: isGlmTtsModel(audioModel) ? input.config.glmTtsFormat : grokTts ? input.config.grokTtsFormat : input.config.audioFormat,
-            audioSpeed: isGlmTtsModel(audioModel) ? input.config.glmTtsSpeed : grokTts ? input.config.grokTtsSpeed : input.config.audioSpeed,
+            audioVoice: isGeminiTtsModel(audioModel) && isGeminiConfig({ ...input.config, model: audioModel }, audioModel) ? input.config.geminiTtsVoice : isGlmTtsModel(audioModel) ? input.config.glmTtsVoice : input.config.audioVoice,
+            audioFormat: isGlmTtsModel(audioModel) ? input.config.glmTtsFormat : input.config.audioFormat,
+            audioSpeed: isGlmTtsModel(audioModel) ? input.config.glmTtsSpeed : input.config.audioSpeed,
         },
         tasks: orderedNodes.flatMap((node) => {
             const taskId = mediaTaskId(node);

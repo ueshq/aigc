@@ -19,7 +19,7 @@ import { deleteStoredImages, imageToDataUrl, uploadImage } from "@/services/imag
 import { channelProtocolForConfig, defaultConfig, localChannelForActiveModel, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import type { ReferenceImage } from "@/types/image";
+import type { ReferenceImage } from "@/types/media";
 
 type WorkflowVariableType = "text" | "textarea" | "number" | "select" | "boolean";
 type WorkflowMode = "single_image" | "multi_image_series";

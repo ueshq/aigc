@@ -108,7 +108,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 协议，支持 OpenAI、Gemini、Grok2API、MiniMax、APIMart、KIE、MiMo、88API |
+| `protocol` | string | 协议，支持 OpenAI、Gemini、MiniMax、MiMo |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | 渠道接口地址 |
 | `apiKey` | string | 渠道密钥 |
@@ -125,3 +125,16 @@ description: settings 表中 public 和 private 配置结构说明
 | --- | --- | --- |
 | `enabled` | boolean | 是否开启定时同步，默认开启 |
 | `cron` | string | Cron 表达式，默认每天 0 点 |
+
+## MiniMax 官方视频协议
+
+`minimax` 默认地址为 `https://api.minimax.io`，使用 Bearer API Key。模型列表固定为 `MiniMax-H3`、`MiniMax-H3-Max`；读取模型列表和渠道测试均不自动生成视频。
+
+应用继续使用现有视频任务接口，由协议层映射至 `POST /v2/video_generation` 和 `GET /v2/query/video_generation/{task_id}`，沿用任务轮询、错误展示和媒体保存。未登录使用浏览器直连；登录后的个人渠道及云端渠道使用账号代理。
+
+- 默认 768P、5 秒。H3 支持 768P / 2K、4–15 秒；H3-Max 支持 480P / 768P、5–15 秒。
+- 文生默认 16:9；首尾帧使用 adaptive，参考生成默认 adaptive。尾帧必须搭配首帧，首尾帧与普通参考素材互斥。
+- H3 支持最多 9 张参考图片、3 个参考视频、3 个参考音频；参考视频和音频各总计最多 15 秒。H3-Max 不支持普通参考素材，已有素材需用户移除。
+- 提示词必填且最多 7000 字符，请求体最多 64MB；校验已知素材格式、体积、尺寸和时长。成功但没有视频地址视为失败。
+
+参数依据：[官方创建接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)、[官方查询接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-query)。真实官方请求及界面验收见待测试文档。
