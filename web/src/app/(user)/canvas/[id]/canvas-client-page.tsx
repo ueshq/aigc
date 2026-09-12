@@ -23,6 +23,7 @@ import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
@@ -311,6 +312,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const historyCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const historyCleanupKeysRef = useRef(new Map<string, string>());
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sidePanelSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const focusAnimationRef = useRef<number | null>(null);
@@ -458,8 +460,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 
     const cleanupCanvasFiles = useCallback(
-        (extra?: unknown) => {
-            cleanupAssetImages({ extra, history: historyRef.current, lastHistory: lastHistoryRef.current });
+        (extra?: unknown, storageKeys?: ReadonlyMap<string, string>) => {
+            cleanupAssetImages({ extra, history: historyRef.current, lastHistory: lastHistoryRef.current }, storageKeys);
         },
         [cleanupAssetImages],
     );
@@ -496,11 +498,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [previewNodeId, getBatchGroupNodes]);
 
     useEffect(() => () => {
+        const storageKeys = historyCleanupKeysRef.current;
+        collectImageStorageKeys([historyRef.current, lastHistoryRef.current], new Set(), undefined, storageKeys).forEach((key) => storageKeys.set(key, key));
+        historyCleanupKeysRef.current = new Map<string, string>();
         if (historyCleanupTimerRef.current) {
             clearTimeout(historyCleanupTimerRef.current);
             historyCleanupTimerRef.current = null;
         }
-    }, [projectId]);
+        const usedKeys = collectImageStorageKeys(nodesRef.current, new Set(), storageKeys);
+        if (Array.from(storageKeys.values()).some((key) => !usedKeys.has(key))) cleanupAssetImages({ nodes: nodesRef.current }, storageKeys, useUserStore.getState().token);
+    }, [cleanupAssetImages, projectId]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -570,8 +577,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const current = createHistoryEntry();
             const last = lastHistoryRef.current;
             if (!last) return;
-            const historyDropped = historyRef.current.past.length >= 50;
-            historyRef.current.past = [...historyRef.current.past.slice(-49), last];
+            const historyDropped = historyRef.current.past.length >= 10 || historyRef.current.future.length > 0;
+            if (historyDropped) collectImageStorageKeys([historyRef.current.past.slice(0, -9), historyRef.current.future], new Set(), undefined, historyCleanupKeysRef.current).forEach((key) => historyCleanupKeysRef.current.set(key, key));
+            historyRef.current.past = [...historyRef.current.past.slice(-9), last];
             historyRef.current.future = [];
             setHistoryState({ canUndo: true, canRedo: false });
             lastHistoryRef.current = current;
@@ -580,7 +588,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 if (historyCleanupTimerRef.current) clearTimeout(historyCleanupTimerRef.current);
                 historyCleanupTimerRef.current = setTimeout(() => {
                     historyCleanupTimerRef.current = null;
-                    cleanupCanvasFiles();
+                    const storageKeys = historyCleanupKeysRef.current;
+                    historyCleanupKeysRef.current = new Map<string, string>();
+                    cleanupCanvasFiles(undefined, storageKeys);
                 }, 2000);
             }
         }, 180);
@@ -1122,6 +1132,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         batchChildIds: childIds,
                         primaryImageId,
                         content: primaryNode?.metadata?.content || nextNode.metadata.content,
+                        storageKey: primaryNode?.metadata?.content ? primaryNode.metadata.storageKey : nextNode.metadata.storageKey,
+                        bytes: primaryNode?.metadata?.content ? primaryNode.metadata.bytes : nextNode.metadata.bytes,
+                        mimeType: primaryNode?.metadata?.content ? primaryNode.metadata.mimeType : nextNode.metadata.mimeType,
                         naturalWidth: primaryNode?.metadata?.naturalWidth || nextNode.metadata.naturalWidth,
                         naturalHeight: primaryNode?.metadata?.naturalHeight || nextNode.metadata.naturalHeight,
                         panoramaProjection: primaryNode?.metadata?.panoramaProjection || nextNode.metadata.panoramaProjection,
@@ -1994,6 +2007,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         metadata: {
                             ...node.metadata,
                             content: child.metadata?.content,
+                            storageKey: child.metadata?.storageKey,
+                            bytes: child.metadata?.bytes,
+                            mimeType: child.metadata?.mimeType,
                             primaryImageId: child.id,
                             naturalWidth: child.metadata?.naturalWidth,
                             naturalHeight: child.metadata?.naturalHeight,
@@ -3095,14 +3111,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         }),
                     );
                     const hasSuccess = taskResults.some(Boolean);
-                    const hasFailure = taskResults.some((result) => !result);
-                    if (hasFailure) message.error(hasSuccess ? "部分图片任务创建失败" : "全部图片任务创建失败");
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片任务创建失败" } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR } }
                                 : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片任务创建失败" } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR } }
                                     : node,
                         ),
                     );
@@ -4375,6 +4389,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onChange={([start, end]) => {
                                 if (Math.round((end - start) * 100) < 50) return;
                                 audioTrimRef.current?.pause();
+                                if (audioTrimRef.current) audioTrimRef.current.currentTime = start;
                                 setAudioTrimStart(start);
                                 setAudioTrimEnd(end);
                             }}
@@ -4502,6 +4517,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     agentConfig={resolvedAgentConfig}
                     width={agentPanel.width}
                     onWidthChange={(width) => setAgentPanel((current) => ({ ...current, width }))}
+                    onFocusNode={focusNode}
                     onSessionsChange={handleAssistantSessionsChange}
                     onAgentConfigChange={handleAgentConfigChange}
                     onPasteImage={pasteAssistantImage}
@@ -5187,6 +5203,7 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
             imageTaskId: task.id || node.metadata?.imageTaskId,
         };
         if (!completed || !url) return { ...node, metadata };
+        const stored = task.imageStorage?.find((image) => image?.url === url);
         const isPanorama = isPanoramaNodeType(node.type);
         const requestedSize = nodeSizeFromRatio(node.metadata?.size || "", fallbackSize.width, fallbackSize.height);
         const naturalWidth = task.width || requestedSize?.width || fallbackSize.width || node.width;
@@ -5202,8 +5219,8 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
                 content: url,
                 storageKey: task.storageKey || "",
                 status: NODE_STATUS_SUCCESS,
-                naturalWidth,
-                naturalHeight,
+                naturalWidth: stored?.width || naturalWidth,
+                naturalHeight: stored?.height || naturalHeight,
                 bytes: task.bytes || 0,
                 mimeType: task.mimeType || "image/png",
                 progress: 100,

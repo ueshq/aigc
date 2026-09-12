@@ -84,7 +84,7 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 		}
 		return path
 	}
-	if isArkSeedanceVideo(channel.BaseURL, modelName) {
+	if service.IsArkChannel(channel) {
 		if path == "/videos" {
 			return "/contents/generations/tasks"
 		}

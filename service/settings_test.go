@@ -42,8 +42,9 @@ func TestFetchAdminChannelModelsReportsArkPlanModelsUnsupported(t *testing.T) {
 	defer server.Close()
 
 	_, err := fetchAdminChannelModels(model.ModelChannel{
-		BaseURL: server.URL + "/api/plan/v3/contents/generations/tasks",
-		APIKey:  "test-key",
+		Protocol: "ark",
+		BaseURL:  server.URL + "/api/plan/v3/contents/generations/tasks",
+		APIKey:   "test-key",
 	})
 	if err == nil {
 		t.Fatal("expected unsupported /models error")

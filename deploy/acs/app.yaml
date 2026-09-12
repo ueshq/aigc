@@ -35,7 +35,6 @@ metadata:
   namespace: aigc
 data:
   STORAGE_DRIVER: mysql
-  PUBLIC_BASE_URL: https://aigc.juxplay.com
   API_BASE_URL: http://127.0.0.1:8080
   AI_LOG_DIR: /app/data/logs/ai-calls
   PROMPT_DATA_DIR: /app/data/prompts

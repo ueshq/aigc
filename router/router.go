@@ -23,12 +23,6 @@ func New() *gin.Engine {
 	api.GET("/auth/me", middleware.OptionalAuth, gin.WrapF(handler.CurrentUser))
 	api.GET("/settings", gin.WrapF(handler.Settings))
 	api.GET("/storage/config", gin.WrapF(handler.StorageConfig))
-	api.GET("/media/references/:id", func(c *gin.Context) {
-		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
-	})
-	api.HEAD("/media/references/:id", func(c *gin.Context) {
-		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
-	})
 	api.GET("/files/:id", func(c *gin.Context) {
 		handler.FileInfo(c.Writer, c.Request, c.Param("id"))
 	})
@@ -67,7 +61,6 @@ func New() *gin.Engine {
 	v1.DELETE("/video-tasks/:id", func(c *gin.Context) {
 		handler.DeleteUserVideoTask(c.Writer, c.Request, c.Param("id"))
 	})
-	v1.POST("/media/references", gin.WrapF(handler.UploadReferenceMedia))
 	v1.GET("/videos/:id", func(c *gin.Context) {
 		handler.AIVideo(c.Writer, c.Request, c.Param("id"))
 	})

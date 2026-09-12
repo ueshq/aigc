@@ -15,6 +15,11 @@ export function isAgnesVideoV25Model(modelName: string) {
     return modelKey(modelName) === "agnes-video-2-5";
 }
 
+export function isSeedance20Model(modelName: string) {
+    const model = modelKey(modelName);
+    return (model.includes("seedance-2-0") || model === "bytedance-seedance-2") && !isSeedanceFastOrMiniModel(modelName);
+}
+
 export function supportsVideoFrameReferences(modelName: string, protocol = "") {
     const model = modelKey(modelName);
     return (
@@ -33,10 +38,10 @@ export function supportsVideoFrameReferences(modelName: string, protocol = "") {
         model === "minimax-h3-image-to-video" ||
         model === "minimax-h3" ||
         model === "minimax-h3-max" ||
-        model.includes("doubao-seedance-2-5") ||
-        model.includes("doubao-seedance-2-0") ||
-        model.includes("doubao-seedance-1-5") ||
-        model.includes("doubao-seedance-1-0") ||
+        model.includes("seedance-2-5") ||
+        model.includes("seedance-2-0") ||
+        model.includes("seedance-1-5") ||
+        model.includes("seedance-1-0") ||
         model === "happyhorse-1-1" ||
         (protocol === "gemini" && isGeminiVeo31Model(modelName)) ||
         (model.includes("veo3-1") && model.includes("official")) ||
@@ -65,9 +70,9 @@ export function supportsVideoAudioGeneration(modelName: string, protocol = "") {
         model === "wan-2-6-flash-image-to-video" ||
         model === "wan-2-6-flash-video-to-video" ||
         model.includes("bytedance-seedance-1-5") ||
-        model.includes("doubao-seedance-2-5") ||
-        model.includes("doubao-seedance-2-0") ||
-        model.includes("doubao-seedance-1-5") ||
+        model.includes("seedance-2-5") ||
+        model.includes("seedance-2-0") ||
+        model.includes("seedance-1-5") ||
         (model.includes("veo") && model.includes("official")) ||
         model === "wan2-6" ||
         model === "wan2-6-i2v-flash" ||
@@ -112,7 +117,7 @@ export function videoDurationRule(config: AiConfig, mode?: VideoReferenceMode): 
     else if (isAgnesVideoV25Model(model)) return { min: 4, max: 12, defaultSeconds: 5 };
     else if (isSeedanceVideoConfig(config)) return { min: 4, max: key.includes("seedance-2-5") ? 30 : 15, defaultSeconds: 5, auto: -1 };
     else if (key.includes("sora-2")) values = [4, 8, 12, 16, 20];
-    else if (key.includes("veo3-1") || key.includes("veo-3-1")) values = [8];
+    else if (key.includes("veo3-1") || key.includes("veo-3-1")) values = [4, 6, 8];
     else if (key.includes("minimax-hailuo-02")) values = [5, 10];
     else if (key.includes("minimax-hailuo-2-3")) values = [6, 10];
     else if (key.includes("omni-flash-ext")) values = [4, 6, 8, 10];
@@ -154,7 +159,7 @@ export function normalizeVideoConfig(config: AiConfig, mode?: VideoReferenceMode
         vquality = "720P";
     } else if (isSeedanceVideoConfig(scoped)) {
         size = normalizeSeedanceRatio(config.size);
-        vquality = normalizeSeedanceResolution(config.vquality, model);
+        if (!isSeedance20Model(model)) vquality = normalizeSeedanceResolution(config.vquality, model);
     }
     return { ...scoped, size, vquality, videoSeconds: normalizeVideoDuration(config.videoSeconds, videoDurationRule(scoped, mode)), videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, false)), videoWatermark: String(boolConfig(config.videoWatermark, false)) };
 }
@@ -177,6 +182,6 @@ export function videoParameterOptions(config: AiConfig): { resolutions?: string[
     if (isMiniMaxH3Config(config, model)) return { resolutions: [...miniMaxVideoCapabilities(model)!.resolutions], ratios: seedanceRatioOptions.map((item) => item.value) };
     if (isGeminiConfig(config, model) && isGeminiVideoModel(model)) return { resolutions: ["720p", "1080p", "4k"], ratios: ["16:9", "9:16", "adaptive"] };
     if (isAgnesVideoV25Model(model)) return { resolutions: ["720P"], ratios: seedanceRatioOptions.filter((item) => item.value !== "adaptive").map((item) => item.value) };
-    if (isSeedanceVideoConfig(config)) return { resolutions: seedanceResolutionOptions.filter((item) => !isSeedanceFastOrMiniModel(model) || item.value !== "1080p").map((item) => item.value), ratios: seedanceRatioOptions.map((item) => item.value) };
+    if (isSeedanceVideoConfig(config)) return { ...(isSeedance20Model(model) ? {} : { resolutions: seedanceResolutionOptions.filter((item) => !isSeedanceFastOrMiniModel(model) || item.value !== "1080p").map((item) => item.value) }), ratios: seedanceRatioOptions.map((item) => item.value) };
     return {};
 }

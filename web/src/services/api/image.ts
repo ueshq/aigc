@@ -1,11 +1,11 @@
-import { aiApiUrl, aiHeaders, usesAccountProxy, refreshRemoteUser, formatErrorDetail, publicHttpUrl } from "./ai-request";
+import { aiApiUrl, aiHeaders, usesAccountProxy, refreshRemoteUser, formatErrorDetail, publicHttpUrl, isCompletedTask } from "./ai-request";
 import axios from "axios";
 
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, isGeminiConfig, normalizeGeminiBaseUrl } from "@/lib/gemini";
-import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
+import { autoSyncImage, imageToDataUrl, resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/media";
@@ -37,7 +37,7 @@ type ChatImagesApiResponse = {
     msg?: string;
 };
 
-type GeneratedImage = { id: string; dataUrl: string; seed?: number };
+type GeneratedImage = { id: string; dataUrl: string; seed?: number } & Partial<UploadedImage>;
 export type CanvasImageTask = {
     id: string;
     parent_task_id?: string;
@@ -54,6 +54,7 @@ export type CanvasImageTask = {
     progress?: number;
     url?: string;
     image_url?: string;
+    imageStorage?: Array<UploadedImage | null>;
     storageKey?: string;
     width?: number;
     height?: number;
@@ -696,11 +697,24 @@ async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?
     return references.length ? requestImageEditSingle(config, prompt, references, params) : requestImageGenerationSingle(config, prompt, params);
 }
 
+async function syncGeneratedImages(images: GeneratedImage[]) {
+    return Promise.all(images.map(async (image) => {
+        const stored = await autoSyncImage(image.dataUrl, image.id, image.storageKey);
+        return stored ? { id: image.id, dataUrl: stored.url, seed: image.seed, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } : image;
+    }));
+}
+
+async function syncCanvasImageTask(task: CanvasImageTask, resultId = task.started_at): Promise<CanvasImageTask> {
+    if (!isCompletedTask(task.status)) return task;
+    const stored = await autoSyncImage((task.image_url || task.url || "").trim(), `${task.id}:${resultId}:0`, task.storageKey);
+    return stored ? { ...task, url: stored.url, image_url: stored.url, storageKey: stored.storageKey, bytes: stored.bytes, mimeType: stored.mimeType, imageStorage: [stored] } : task;
+}
+
 export async function requestGeneration(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string) {
     try {
         const images = await requestImages(config, prompt, []);
         refreshRemoteUser(config);
-        return images;
+        return syncGeneratedImages(images);
     } catch (error) {
         if (error instanceof ImageRequestError) throw error;
         throw new Error(error instanceof Error ? error.message : "请求失败");
@@ -711,7 +725,7 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
     try {
         const images = await requestImages(config, prompt, references);
         refreshRemoteUser(config);
-        return images;
+        return syncGeneratedImages(images);
     } catch (error) {
         if (error instanceof ImageRequestError) throw error;
         throw new Error(error instanceof Error ? error.message : "请求失败");
@@ -723,7 +737,7 @@ export async function createCanvasImageTask(config: AiConfig & { seedIndex?: num
         const images = await requestImages({ ...config, count: "1" }, prompt, references);
         const [image] = images;
         if (!image) throw new Error("接口没有返回图片");
-        return {
+        return syncCanvasImageTask({
             id: options.clientTaskId || nanoid(),
             source: options.source || "canvas",
             source_id: options.sourceId || "",
@@ -733,7 +747,7 @@ export async function createCanvasImageTask(config: AiConfig & { seedIndex?: num
             status: "completed",
             progress: 100,
             image_url: image.dataUrl,
-        };
+        }, image.id);
     }
     const params = createImageRequestParams({ ...config, count: "1" });
     const request = await createCanvasImageTaskRequest({ ...config, count: "1" }, prompt, references, params, options);
@@ -745,7 +759,7 @@ export async function createCanvasImageTask(config: AiConfig & { seedIndex?: num
     const payload = (await response.json()) as { code?: number; msg?: string; data?: CanvasImageTask };
     if (payload.code !== 0 || !payload.data) throw new ImageRequestError(payload.msg || "图片任务创建失败", payload);
     refreshRemoteUser(config);
-    return payload.data;
+    return syncCanvasImageTask(payload.data);
 }
 
 export async function pollCanvasImageTaskStatus(taskId: string): Promise<CanvasImageTask> {
@@ -760,7 +774,7 @@ export async function pollCanvasImageTaskStatus(taskId: string): Promise<CanvasI
     }
     const payload = (await response.json()) as { code?: number; msg?: string; data?: CanvasImageTask };
     if (payload.code !== 0 || !payload.data) throw new ImageRequestError(payload.msg || "读取图片任务失败", payload);
-    return payload.data;
+    return syncCanvasImageTask(payload.data);
 }
 
 async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], params: ImageRequestParams, options: CanvasImageTaskOptions): Promise<RequestInit> {
@@ -1202,7 +1216,7 @@ export async function batchCanvasImageTaskStatus(config: AiConfig, ids: string[]
     }
     const payload = (await response.json()) as { code?: number; msg?: string; data?: CanvasImageTask[] };
     if (payload.code !== 0 || !Array.isArray(payload.data)) throw new ImageRequestError(payload.msg || "读取图片任务失败", payload);
-    return payload.data;
+    return Promise.all(payload.data.map((task) => syncCanvasImageTask(task)));
 }
 
 export async function deleteCanvasImageTask(config: AiConfig, task?: CanvasImageTask | null) {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestModelProtocolAuthContract(t *testing.T) {
-	for _, protocol := range []string{"", "openai", " GEMINI ", "minimax", "mimo", "unknown"} {
+	for _, protocol := range []string{"", "openai", " GEMINI ", "minimax", "mimo", "ark", "unknown"} {
 		request := httptest.NewRequest(http.MethodPost, "https://upstream.invalid", nil)
 		request.Header.Set("Authorization", "existing authorization")
 		request.Header.Set("x-goog-api-key", "existing google key")
@@ -112,8 +112,8 @@ func TestModelProtocolConfigTestsDoNotGenerate(t *testing.T) {
 	})
 	tests := []struct{ protocol, baseURL, model, want string }{
 		{"minimax", "https://api.example/api/plan/v3", "seedance", "MiniMax H3 系列是异步视频模型，请在视频创作台测试生成。"},
-		{"openai", "https://api.example/api/plan/v3", "deployment", "Agent Plan / Seedance 视频模型配置格式已通过。后台测试不会调用视频生成接口，因此未验证 API Key、套餐额度或模型权限；请在画布中使用视频生成验证。"},
-		{"gemini", "https://api.example", "seedance", "Seedance 视频模型不会发送 /chat/completions 文本测试。已检查 Base URL、API Key 和模型名非空；未调用视频生成接口，因此未验证套餐额度或模型权限。"},
+		{"ark", "https://api.example/api/plan/v3", "deployment", "Agent Plan / Seedance 视频模型配置格式已通过。后台测试不会调用视频生成接口，因此未验证 API Key、套餐额度或模型权限；请在画布中使用视频生成验证。"},
+		{"ark", "https://ark.cn-beijing.volces.com/api/v3", "seedance", "Seedance 视频模型不会发送 /chat/completions 文本测试。已检查 Base URL、API Key 和模型名非空；未调用视频生成接口，因此未验证套餐额度或模型权限。"},
 		{"gemini", "https://api.example", "veo-3", "模型列表与渠道配置有效；图片、视频和语音模型未执行付费生成测试。"},
 		{"gemini", "https://api.example", "gemini-image", "模型列表与渠道配置有效；图片、视频和语音模型未执行付费生成测试。"},
 		{"gemini", "https://api.example", "mimo-v2.5-tts-voiceclone", "MiMo VoiceClone 需要画布连接 MP3/WAV 参考音频，后台不发送克隆样本，因此未执行上游生成测试。"},

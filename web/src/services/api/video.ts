@@ -1,15 +1,15 @@
-import { aiApiUrl, aiHeaders, usesAccountProxy, isCompletedTask, formatErrorDetail, publicHttpUrl } from "./ai-request";
+import { aiApiUrl, aiHeaders, usesAccountProxy, isCompletedTask, isFailedTask, formatErrorDetail, publicHttpUrl } from "./ai-request";
 import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, geminiOperationUrl, isGeminiConfig, isGeminiVideoModel, isGeminiVeo31Model, normalizeGeminiVideoRatio } from "@/lib/gemini";
 import axios from "axios";
 
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isMiniMaxH3Config, miniMaxVideoInputError, miniMaxMediaLimits, miniMaxMediaFormats, MINIMAX_REQUEST_MAX_BYTES } from "@/lib/minimax-video";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import { normalizeVideoConfig, videoReferenceMode, normalizeVideoSizeValue, normalizeVideoResolutionValue, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
-import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
-import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
-import { channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { normalizeVideoConfig, videoDurationRule, videoReferenceMode, normalizeVideoSizeValue, normalizeVideoResolutionValue, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
+import { autoSyncToCloud, imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
+import { channelIdForActiveModel, channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 
 export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | VideoResponse[] | null; msg?: string; message?: string };
@@ -38,6 +38,9 @@ function aiVideoPollUrl(config: AiConfig, model: string, id: string) {
     }
     if (!usesAccountProxy(config) && isCogVideoX3Model(model)) {
         return aiApiUrl(config, `/async-result/${encodeURIComponent(id)}`);
+    }
+    if (!usesAccountProxy(config) && isArkVideoConfig(config, model)) {
+        return aiApiUrl(config, `/contents/generations/tasks/${encodeURIComponent(id)}`);
     }
     if (!isAgnesVideoModel(model) || !id.startsWith("video_")) {
         return aiApiUrl(config, `/videos/${encodeURIComponent(id)}`);
@@ -81,12 +84,13 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
             ? geminiActionUrl(channel?.baseUrl || config.baseUrl, model, "predictLongRunning")
             : !accountProxy && isMiniMaxH3Config(config, model)
                 ? miniMaxApiUrl(config, "/v2/video_generation")
-                : aiApiUrl(config, !accountProxy && isCogVideoX3Model(model) ? "/videos/generations" : "/videos");
+                : aiApiUrl(config, accountProxy ? "/videos" : isArkVideoConfig(config, model) ? "/contents/generations/tasks" : isCogVideoX3Model(model) ? "/videos/generations" : "/videos");
         const requestBody = !accountProxy && isGeminiConfig(config, model) ? withoutVideoModel(body) : body;
         const created = unwrapVideoResponseForConfig(config, model, (await axios.post<ApiVideoResponse>(createUrl, requestBody, { headers })).data);
         if (!created.id && !created.video_id) throw new Error("视频接口没有返回任务 ID");
-        if (typeof created.progress === "number") onProgress?.(created.progress, created);
-        return created;
+        const task = await syncGeneratedVideo(created, config);
+        if (typeof task.progress === "number") onProgress?.(task.progress, task);
+        return task;
     } catch (error) {
         const { message, detail } = readAxiosError(error, "视频生成失败");
         throw new VideoRequestError(message, detail);
@@ -98,7 +102,23 @@ export async function pollVideoGenerationTaskStatus(config: AiConfig, task: Vide
     const pollId = videoPollId(model, task);
     if (!pollId) throw new VideoRequestError("视频接口没有返回任务 ID", task);
     const result = unwrapVideoResponseForConfig(config, model, (await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
-    return cacheProtectedGeminiVideo(config, model, result);
+    return syncGeneratedVideo(await cacheProtectedGeminiVideo(config, model, result), config, true);
+}
+
+function videoSyncKey(config: AiConfig, task: VideoResponse) {
+    const channelId = config.channelMode === "remote" ? channelIdForActiveModel(config) : localChannelForActiveModel(config)?.id;
+    return `${config.channelMode}:${channelId || config.baseUrl}:${task.id}:${task.task_id || ""}:${task.video_id || ""}`;
+}
+
+async function syncGeneratedVideo(task: VideoResponse, config: AiConfig, contentResolved = false): Promise<VideoResponse> {
+    const url = task.video_url || task.url || "";
+    if (task.storageKey || isFailedTask(task.status) || (!isCompletedTask(task.status) && !url)) return task;
+    const media = await autoSyncToCloud(`video:${videoSyncKey(config, task)}`, async () => {
+        const cached = contentResolved ? task : await cacheProtectedGeminiVideo(config, config.model || config.videoModel, task);
+        if (cached.storageKey) return { url: cached.video_url || cached.url || url, storageKey: cached.storageKey };
+        return url ? uploadRemoteMediaToServer(url, "video") : null;
+    });
+    return media ? { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey } : task;
 }
 
 export async function listVideoGenerationTasks(config: AiConfig) {
@@ -142,6 +162,7 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    if (isArkVideoConfig(config, model)) return createArkSeedanceVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSizeValue(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
     if (isMiniMaxH3Config(config, model)) return createMiniMaxH3VideoRequestBody(config, model, prompt, input);
@@ -190,6 +211,43 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     const audios = await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
     audios.forEach((file) => body.append("audio_reference[]", file));
     return body;
+}
+
+function isArkVideoConfig(config: AiConfig, model: string) {
+    return channelProtocolForConfig({ ...config, model, videoModel: model }) === "ark";
+}
+
+async function createArkSeedanceVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    const [images, firstFrame, lastFrame, videos, audios] = await Promise.all([
+        Promise.all(input.references.map(imageToAgnesReference)),
+        input.firstFrame ? imageToAgnesReference(input.firstFrame) : "",
+        input.lastFrame ? imageToAgnesReference(input.lastFrame) : "",
+        Promise.all(input.videoReferences.map(arkMediaReferenceUrl)),
+        Promise.all(input.audioReferences.map(arkMediaReferenceUrl)),
+    ]);
+    const image = (url: string, role: string) => ({ type: "image_url", image_url: { url }, role });
+    return {
+        model,
+        content: [
+            { type: "text", text: prompt },
+            ...images.map((url) => image(url, "reference_image")),
+            ...(firstFrame ? [image(firstFrame, "first_frame")] : []),
+            ...(lastFrame ? [image(lastFrame, "last_frame")] : []),
+            ...videos.map((url) => ({ type: "video_url", video_url: { url }, role: "reference_video" })),
+            ...audios.map((url) => ({ type: "audio_url", audio_url: { url }, role: "reference_audio" })),
+        ],
+        duration: normalizeSeedanceDuration(config.videoSeconds, videoDurationRule(config).max),
+        ratio: normalizeSeedanceRatio(config.size),
+        resolution: normalizeVideoResolution(config.vquality),
+        generate_audio: boolConfig(config.videoGenerateAudio, false),
+        watermark: boolConfig(config.videoWatermark, false),
+    };
+}
+
+async function arkMediaReferenceUrl(media: ReferenceVideo | ReferenceAudio) {
+    const url = publicHttpUrl(await resolveMediaUrl(media.storageKey, media.url)) || publicHttpUrl(media.url);
+    if (!url) throw new VideoRequestError("火山方舟的参考视频和参考音频需要方舟服务器能够访问的 URL");
+    return url;
 }
 
 async function createMiniMaxH3VideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
@@ -351,6 +409,12 @@ function unwrapVideoResponse(payload: ApiVideoResponse): VideoResponse {
 
 function unwrapVideoResponseForConfig(config: AiConfig, model: string, payload: ApiVideoResponse) {
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return normalizeGeminiVideoResponse(payload);
+    if (!isVideoEnvelope(payload) && isArkVideoConfig(config, model)) {
+        const root = payload as unknown as Record<string, unknown>;
+        const message = nestedMessage(root.error);
+        const status = firstString(root.status).toLowerCase();
+        return normalizeVideoResponse({ ...root, status: message || status === "expired" ? "failed" : status, error: message ? { message } : undefined });
+    }
     if (isMiniMaxH3Config(config, model)) {
         const root = payload as unknown as Record<string, unknown>;
         const task = root.task && typeof root.task === "object" ? root.task as Record<string, unknown> : null;
@@ -440,7 +504,7 @@ async function cacheProtectedGeminiVideo(config: AiConfig, model: string, task: 
         { headers: aiHeaders(config) },
     );
     if (!response.ok) throw new VideoRequestError(`视频内容下载失败：${response.status}`, task);
-    const media = await uploadMediaFile(await response.blob(), "generated-video");
+    const media = await uploadMediaFile(await response.blob(), "generated-video", `video-content:${videoSyncKey(config, task)}`);
     return { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey };
 }
 

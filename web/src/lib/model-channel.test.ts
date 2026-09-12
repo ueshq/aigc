@@ -7,6 +7,7 @@ test("built-in protocol options are shared by both settings panels", () => {
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
         { label: "MiniMax", value: "minimax" },
+        { label: "火山方舟", value: "ark" },
         { label: "MiMo", value: "mimo" },
     ]);
 });
@@ -16,6 +17,7 @@ test("built-in protocols use official default URLs and API Key links", () => {
         openai: "https://api.openai.com",
         gemini: "https://generativelanguage.googleapis.com",
         minimax: "https://api.minimax.io",
+        ark: "https://ark.cn-beijing.volces.com/api/v3",
         mimo: "https://api.xiaomimimo.com",
     });
     assert.deepEqual(modelChannelApiKeyUrls, {

@@ -19,8 +19,10 @@ func TestModelProtocolProxyPathContract(t *testing.T) {
 		{"minimax max create", "minimax", "https://api.minimax.io", "MiniMax-H3-Max", "/videos", "/v2/video_generation"},
 		{"minimax query", "minimax", "", "MiniMax-H3-Max", "/videos/task a?b", "/v2/query/video_generation/task%20a%3Fb"},
 		{"cog create", "openai", "", " COGVIDEOX-3 ", "/videos", "/videos/generations"},
-		{"ark by model", "openai", "", "doubao-seedance-2", "/videos", "/contents/generations/tasks"},
-		{"ark by URL", "openai", "https://api.example/API/PLAN/V3", "deployment-id", "/videos", "/contents/generations/tasks"},
+		{"openai seedance unchanged", "openai", "", "doubao-seedance-2", "/videos", "/videos"},
+		{"openai plan URL unchanged", "openai", "https://api.example/API/PLAN/V3", "deployment-id", "/videos", "/videos"},
+		{"ark create", "ark", "https://ark.cn-beijing.volces.com/api/v3", "doubao-seedance-2.0", "/videos", "/contents/generations/tasks"},
+		{"ark poll", "ark", "https://ark.cn-beijing.volces.com/api/plan/v3", "doubao-seedance-2.0", "/videos/task a?b", "/contents/generations/tasks/task a?b"},
 		{"removed provider URL stays compatible", "openai", "https://api.kie.ai", "vendor/kie/model", "/videos", "/videos"},
 		{"removed image URL stays compatible", "openai", "https://api.apimart.ai", "gpt-image-2", "/images/edits", "/images/edits"},
 	}

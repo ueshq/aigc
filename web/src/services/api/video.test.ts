@@ -10,7 +10,7 @@ import { requestCanvasAgentTurn } from "./canvas-agent";
 import { useUserStore } from "../../stores/use-user-store";
 import { createVideoGenerationTask, pollVideoGenerationTaskStatus, isCompletedVideoTask } from "./video";
 
-function configFor(model: string, protocol: "minimax" | "openai" | "gemini" | "mimo" = "minimax"): AiConfig {
+function configFor(model: string, protocol: "minimax" | "openai" | "gemini" | "mimo" | "ark" = "minimax"): AiConfig {
     const channel = { id: "channel", name: "fixture", protocol, baseUrl: "https://api.minimax.io", apiKey: "test-key", models: [model] };
     return { ...defaultConfig, model, videoModel: model, videoChannelId: channel.id, localChannels: [channel], vquality: "768P", videoSeconds: "5", size: "adaptive" };
 }
@@ -74,6 +74,29 @@ test("query failures and missing output remain visible", async (context) => {
     await assert.rejects(pollVideoGenerationTaskStatus(config, { id: "job" }), /没有返回视频地址/);
     payload = { type: "error", error: { type: "authorized_error", message: "invalid key" } };
     await assert.rejects(pollVideoGenerationTaskStatus(config, { id: "job" }), /invalid key/);
+});
+
+test("browser direct Ark Seedance uses native task paths and content body", async (context) => {
+    const user = useUserStore.getState();
+    context.mock.method(useUserStore, "getState", () => ({ ...user, token: "" }));
+    context.mock.method(globalThis, "fetch", () => { throw new Error("unexpected network I/O"); });
+    const model = "doubao-seedance-2-0-260128";
+    const config = { ...configFor(model, "ark"), localChannels: [{ id: "channel", name: "fixture", protocol: "ark" as const, baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "test-key", models: [model] }], size: "16:9", vquality: "4k" };
+    let createdBody: Record<string, unknown> = {};
+    context.mock.method(axios, "post", async (url: string, body: Record<string, unknown>, options: { headers: Record<string, string> }) => {
+        assert.equal(url, "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks");
+        assert.equal(options.headers.Authorization, "Bearer test-key");
+        createdBody = body;
+        return { data: { id: "cgt-job" } };
+    });
+    context.mock.method(axios, "get", async (url: string) => {
+        assert.equal(url, "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/cgt-job");
+        return { data: { id: "cgt-job", status: "expired" } };
+    });
+    const created = await createVideoGenerationTask(config, "scene");
+    assert.deepEqual(createdBody, { model, content: [{ type: "text", text: "scene" }], duration: 5, ratio: "16:9", resolution: "4k", generate_audio: false, watermark: false });
+    const task = await pollVideoGenerationTaskStatus(config, created);
+    assert.equal(task.status, "failed");
 });
 
 test("retained OpenAI, Seedance, CogVideoX and Agnes builders stay reachable", async (context) => {
@@ -148,11 +171,12 @@ test("shared model rules and submitted video parameters agree", async (context) 
     context.mock.method(useUserStore, "getState", () => ({ ...user, token: "" }));
     const fixtures = [
         { model: "sora-2", protocol: "openai", seconds: "7", want: "8" },
-        { model: "veo-3.1", protocol: "openai", seconds: "4", want: "8" },
+        { model: "veo-3.1", protocol: "openai", seconds: "4", want: "4" },
         { model: "veo-3.1", protocol: "gemini", seconds: "5", want: "4", resolution: "720" },
         { model: "veo-3.1", protocol: "gemini", seconds: "4", want: "8", resolution: "1080" },
         { model: "doubao-seedance-2.5", protocol: "openai", seconds: "40", want: "30" },
         { model: "doubao-seedance-2", protocol: "openai", seconds: "-1", want: "-1" },
+        { model: "doubao-seedance-2.5", protocol: "ark", seconds: "40", want: "30" },
         { model: "cogvideox-3", protocol: "openai", seconds: "8", want: "10" },
         { model: "agnes-video-2.5", protocol: "openai", seconds: "30", want: "12" },
         { model: "minimax-hailuo-02", protocol: "openai", seconds: "8", want: "10" },

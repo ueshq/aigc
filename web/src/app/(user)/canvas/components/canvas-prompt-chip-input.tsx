@@ -39,6 +39,7 @@ type PromptToken =
 export function CanvasPromptChipInput({ value, references, onChange, onReferenceIdsChange, onSubmit, onPasteImage, pendingReferences, skills, onSkillRemove, readOnly, className, style, placeholder, placeholderClassName }: CanvasPromptChipInputProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
+    const caretRangeRef = useRef<Range | null>(null);
     const skillIconRef = useRef<SVGSVGElement>(null);
     const composingRef = useRef(false);
     const lastEmittedRef = useRef(value);
@@ -78,7 +79,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onReference
         const editor = editorRef.current;
         if (!editor) return;
         editor.querySelectorAll<HTMLElement>("[data-pending-reference='true']").forEach(removeReferenceChip);
-        pendingReferences?.forEach((reference) => appendReferenceChip(editor, reference, theme, setImagePreview, true));
+        pendingReferences?.forEach((reference) => appendReferenceChip(editor, reference, theme, setImagePreview, true, caretRangeRef.current));
     }, [pendingReferences, theme]);
 
     const emitChange = (nextValue: string) => {
@@ -103,6 +104,9 @@ export function CanvasPromptChipInput({ value, references, onChange, onReference
     };
 
     const syncMention = () => {
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (range?.collapsed && editorRef.current?.contains(range.startContainer)) caretRangeRef.current = range.cloneRange();
         const text = textBeforeCaret();
         const match = /@([^\s@]*)$/.exec(text);
         if (!match || !activeReferences.length) {
@@ -464,9 +468,18 @@ function appendReferenceChip(
     theme: (typeof canvasThemes)[keyof typeof canvasThemes],
     onImagePreview: (url: string) => void,
     pending = false,
+    caret?: Range | null,
 ) {
     const chip = createReferenceChip(reference, theme, onImagePreview);
     if (pending) chip.dataset.pendingReference = "true";
+    if (caret && editor.contains(caret.startContainer)) {
+        const trailingSpace = document.createTextNode(" ");
+        caret.insertNode(trailingSpace);
+        trailingSpace.before(" ", chip);
+        caret.setStartAfter(trailingSpace);
+        caret.collapse(true);
+        return;
+    }
     let line = editor;
     while (true) {
         let last = line.lastChild;

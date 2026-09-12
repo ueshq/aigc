@@ -288,6 +288,7 @@ export type AdminPrivateSettings = {
         mode: string;
         allowUserProvider: boolean;
         allowUserGlobalProvider: boolean;
+        autoSyncAllAssets: boolean;
         providers: AdminStorageProvider[];
         roundRobinCursor: number;
         capacityCheck: {

@@ -6,7 +6,7 @@ import { Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastOrMiniModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { normalizeVideoConfig, normalizeVideoSizeValue, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { isSeedance20Model, normalizeVideoConfig, normalizeVideoSizeValue, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { isMiniMaxH3Config, miniMaxVideoCapabilities, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
 import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-store";
 
@@ -185,7 +185,8 @@ function MiniMaxVideoSettingsPanel({ config, modelName = "MiniMax-H3", onConfigC
 
 function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle, className, visualOnly }: VideoSettingsPanelProps) {
     const model = modelName || config.model || config.videoModel;
-    const resolution = normalizeSeedanceResolution(config.vquality, model);
+    const seedance20 = isSeedance20Model(model);
+    const resolution = seedance20 ? normalizeVideoResolutionValue(config.vquality) : normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
     const maxSeconds = videoDurationRule(config).max;
     const duration = normalizeSeedanceDuration(config.videoSeconds, maxSeconds);
@@ -199,7 +200,7 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
                 <SettingGroup title="分辨率" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {seedanceResolutionOptions.map((item) => {
+                        {(seedance20 ? resolutionButtonOptions : seedanceResolutionOptions).map((item) => {
                             const disabled = item.value === "1080p" && isSeedanceFastOrMiniModel(model);
                             return (
                                 <OptionPill key={item.value} selected={resolution === item.value} disabled={disabled} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
@@ -207,6 +208,7 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
                                 </OptionPill>
                             );
                         })}
+                        {seedance20 ? <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} /> : null}
                     </div>
                     {isSeedanceFastOrMiniModel(model) ? <div className="text-[11px] leading-4 opacity-55">fast / mini 模型不支持 1080p，会自动使用 720p。</div> : null}
                 </SettingGroup>
