@@ -46,7 +46,9 @@ func prepareAIProtocolRequest(input aiProtocolRequest) (aiProtocolRequest, error
 	}
 	if isMiniMaxH3Channel(input.channel, input.modelName) && input.endpoint == "/videos" {
 		input.failureLabel = "MiniMax"
-		return input, service.ValidateMiniMaxVideoRequest(input.body)
+		var err error
+		input.body, err = service.PrepareMiniMaxVideoRequest(input.modelName, input.body)
+		return input, err
 	}
 	return input, nil
 }
@@ -71,7 +73,7 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 	if isMiniMaxH3Channel(channel, modelName) || isCogVideoX3Model(modelName) {
 		createPath, queryPath := "/videos/generations", "/async-result/"
 		if isMiniMaxH3Channel(channel, modelName) {
-			createPath, queryPath = "/v2/video_generation", "/v2/query/video_generation/"
+			createPath, queryPath = service.MiniMaxCreatePath(modelName), "/v2/query/video_generation/"
 		}
 		if path == "/videos" {
 			return createPath
@@ -111,5 +113,5 @@ func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string
 }
 
 func isMiniMaxH3Channel(channel model.ModelChannel, modelName string) bool {
-	return service.IsMiniMaxChannel(channel) && service.IsMiniMaxH3ModelName(modelName)
+	return service.IsMiniMaxChannel(channel) && service.IsMiniMaxTaskModelName(modelName)
 }

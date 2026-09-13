@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"net/http"
 	"net/url"
 	"strings"
 

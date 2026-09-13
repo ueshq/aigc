@@ -128,7 +128,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 ## MiniMax 官方视频协议
 
-`minimax` 默认地址为 `https://api.minimax.io`，使用 Bearer API Key。模型列表固定为 `MiniMax-H3`、`MiniMax-H3-Max`；读取模型列表和渠道测试均不自动生成视频。
+`minimax` 默认地址为国际站 `https://api.minimax.io`，国内站为 `https://api.minimax.cn`；两站接口、模型和参数一致，API Key 需与站点对应，个人配置和管理后台的接口地址下方可一键切换。使用 Bearer API Key。模型列表固定为 `MiniMax-H3`、`MiniMax-H3-Max`；读取模型列表和渠道测试均不自动生成视频。
 
 应用继续使用现有视频任务接口，由协议层映射至 `POST /v2/video_generation` 和 `GET /v2/query/video_generation/{task_id}`，沿用任务轮询、错误展示和媒体保存。未登录使用浏览器直连；登录后的个人渠道及云端渠道使用账号代理。
 
@@ -136,5 +136,20 @@ description: settings 表中 public 和 private 配置结构说明
 - 文生默认 16:9；首尾帧使用 adaptive，参考生成默认 adaptive。尾帧必须搭配首帧，首尾帧与普通参考素材互斥。
 - H3 支持最多 9 张参考图片、3 个参考视频、3 个参考音频；参考视频和音频各总计最多 15 秒。H3-Max 不支持普通参考素材，已有素材需用户移除。
 - 提示词必填且最多 7000 字符，请求体最多 64MB；校验已知素材格式、体积、尺寸和时长。成功但没有视频地址视为失败。
+- 视频设置开启“添加水印”时请求携带 `aigc_watermark: true`，关闭时不发送该字段。
+- 按官方建议约每 10 秒查询一次 MiniMax 任务：后端轮询器和浏览器轮询保持 5 秒节拍，距上次查询不足 7.5 秒的 MiniMax 任务跳过本轮；其他协议仍为 5 秒。
 
-参数依据：[官方创建接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)、[官方查询接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-query)。真实官方请求及界面验收见待测试文档。
+### AI 优化提示词与 2K 重生成
+
+两项功能仅对 `MiniMax-H3` 开放，均复用 `/api/v1/videos`。账号代理时以内部模型名区分，后端按对应规则校验后把请求体 `model` 改回 `MiniMax-H3`，并按 `MiniMax-H3` 选择渠道；浏览器直连直接请求官方地址。
+
+| 功能 | 内部模型名 | 官方接口 | 说明 |
+| --- | --- | --- | --- |
+| AI 优化提示词 | `MiniMax-H3-Context-IR` | `POST /v2/h3_context_ir` | 提交当前提示词、首尾帧或参考素材、时长和比例，结果为 `task.content.prompt`，确认后替换输入框。任务不写入视频任务表，通过 `GET /api/v1/videos/{task_id}` 透传官方查询。 |
+| 2K 重生成 | `MiniMax-H3-Regenerate-2K` | `POST /v2/video_regeneration` | 针对成功的 768P 成片，`resolution` 固定为 `2K`，提交原提示词、原首尾帧或参考素材，以及 `role: base_video` 的成片地址；结果作为新视频任务轮询和保存。 |
+
+- 成片地址必须能被 MiniMax 访问；本地或 `data:` 地址需先同步到云端。
+- 内部模型名不出现在模型列表中；需要扣算力时，在“模型算力点”中单独设置，未设置时不扣点。
+- 2K 重生成失败后重试仍基于原成片。未使用官方需白名单的 `source_task_id` 方式。
+
+参数依据：[官方创建接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)、[官方查询接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-query)、[H3-Context-IR](https://platform.minimax.io/docs/api-reference/video-generation-v2-h3-context-ir)、[视频重生成](https://platform.minimax.io/docs/api-reference/video-generation-v2-regeneration)、[国内站创建接口](https://platform.minimax.cn/docs/api-reference/video-generation-v2-create)。真实官方请求及界面验收见待测试文档。

@@ -174,9 +174,16 @@ function MiniMaxVideoSettingsPanel({ config, modelName = "MiniMax-H3", onConfigC
                 <SettingGroup title={referenceMode === "frames" ? "比例（跟随首帧）" : "比例"} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">{ratios.map((item) => <OptionPill key={item.value} selected={ratio === item.value} theme={theme} onClick={() => onConfigChange("size", item.value)}>{item.value === "adaptive" ? "自适应" : item.value}</OptionPill>)}</div>
                 </SettingGroup>
-                {!visualOnly ? <SettingGroup title="秒数" color={theme.node.muted}>
-                    <NumberInput value={String(duration)} min={capability.minSeconds} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(normalizeMiniMaxH3Duration(value, modelName)))} />
-                </SettingGroup> : null}
+                {!visualOnly ? <>
+                    <SettingGroup title="秒数" color={theme.node.muted}>
+                        <NumberInput value={String(duration)} min={capability.minSeconds} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(normalizeMiniMaxH3Duration(value, modelName)))} />
+                    </SettingGroup>
+                    <SettingGroup title="输出" color={theme.node.muted}>
+                        <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
+                            <SwitchRow label="添加水印" checked={boolConfig(config.videoWatermark, false)} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} />
+                        </div>
+                    </SettingGroup>
+                </> : null}
                 <div className="text-xs leading-5" style={{ color: theme.node.muted }}>{capability.references ? "原生音画同步。首尾帧与普通参考素材不能混用；尾帧需要搭配首帧。" : "原生音画同步，支持文生、首帧和首尾帧；请移除普通参考图片、视频及音频。"}</div>
             </div>
         </ImageSettingsTheme>

@@ -1,8 +1,11 @@
 import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { normalizeSeedanceRatio, seedanceRatioOptions } from "@/lib/seedance-video";
+import { boolConfig, normalizeSeedanceRatio, seedanceRatioOptions } from "@/lib/seedance-video";
 import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-store";
 
 export const MINIMAX_CHANNEL_PROTOCOL = "minimax" as const;
+/** Account-proxy task models for H3-Context-IR and 2K regeneration; the backend sends both upstream as MiniMax-H3. */
+export const MINIMAX_CONTEXT_IR_MODEL = "MiniMax-H3-Context-IR";
+export const MINIMAX_REGENERATION_MODEL = "MiniMax-H3-Regenerate-2K";
 export const miniMaxVideoModels = {
     "MiniMax-H3": { resolutions: ["768P", "2K"], minSeconds: 4, references: true },
     "MiniMax-H3-Max": { resolutions: ["480P", "768P"], minSeconds: 5, references: false },
@@ -20,6 +23,11 @@ export const miniMaxMediaFormats = {
 export function miniMaxVideoCapabilities(model: string) {
     const key = miniMaxModels.find((name) => name.toLowerCase() === model.trim().toLowerCase());
     return key ? miniMaxVideoModels[key as keyof typeof miniMaxVideoModels] : null;
+}
+
+/** Prompt optimization and 2K regeneration are only offered for MiniMax-H3, not H3-Max. */
+export function isMiniMaxH3BaseModel(model?: string) {
+    return model?.trim().toLowerCase() === "minimax-h3";
 }
 
 export function isMiniMaxChannel(channel?: { protocol?: string }) {
@@ -53,7 +61,7 @@ export function normalizeMiniMaxH3Ratio(value: string, mode?: MiniMaxReferenceMo
 export function normalizeMiniMaxVideoConfig(config: AiConfig, mode?: MiniMaxReferenceMode): AiConfig {
     const model = config.model || config.videoModel;
     if (!isMiniMaxH3Config(config, model)) return config;
-    return { ...config, vquality: normalizeMiniMaxH3Resolution(config.vquality, model), videoSeconds: String(normalizeMiniMaxH3Duration(config.videoSeconds, model)), size: normalizeMiniMaxH3Ratio(config.size, mode), videoGenerateAudio: "true" };
+    return { ...config, vquality: normalizeMiniMaxH3Resolution(config.vquality, model), videoSeconds: String(normalizeMiniMaxH3Duration(config.videoSeconds, model)), size: normalizeMiniMaxH3Ratio(config.size, mode), videoGenerateAudio: "true", videoWatermark: String(boolConfig(config.videoWatermark, false)) };
 }
 
 export type MiniMaxVideoReferences = {

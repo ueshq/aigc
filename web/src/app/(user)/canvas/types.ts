@@ -86,6 +86,8 @@ export type CanvasNodeMetadata = {
     audioTaskResultId?: string;
     videoTaskId?: string;
     videoTaskVideoId?: string;
+    /** Source MiniMax-H3 video node of a 2K regeneration result, reused when the result is retried. */
+    regenerateSourceNodeId?: string;
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
     cameraControl?: CameraControlOptions;

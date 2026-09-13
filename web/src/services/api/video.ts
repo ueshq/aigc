@@ -4,19 +4,21 @@ import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, geminiO
 import axios from "axios";
 
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
-import { isMiniMaxH3Config, miniMaxVideoInputError, miniMaxMediaLimits, miniMaxMediaFormats, MINIMAX_REQUEST_MAX_BYTES } from "@/lib/minimax-video";
+import { isMiniMaxH3BaseModel, isMiniMaxH3Config, miniMaxVideoInputError, miniMaxMediaLimits, miniMaxMediaFormats, MINIMAX_CONTEXT_IR_MODEL, MINIMAX_REGENERATION_MODEL, MINIMAX_REQUEST_MAX_BYTES } from "@/lib/minimax-video";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, videoDurationRule, videoReferenceMode, normalizeVideoSizeValue, normalizeVideoResolutionValue, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { autoSyncToCloud, imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { channelIdForActiveModel, channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 
-export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
+export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string; prompt?: string };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | VideoResponse[] | null; msg?: string; message?: string };
 type ApiVideoResponse = VideoResponse | ApiVideoEnvelope;
 export type VideoProgressHandler = (progress: number, task: VideoResponse) => void;
 export type VideoTaskCreateOptions = { clientTaskId?: string; source?: "video-workbench" | "canvas"; sourceId?: string };
 export const VIDEO_POLL_INTERVAL_MS = 5000;
+const MINIMAX_POLL_INTERVAL_MS = 10000;
+const MINIMAX_PROMPT_MAX_POLLS = 60;
 
 export class VideoRequestError extends Error {
     detail?: string;
@@ -69,6 +71,8 @@ export type VideoReferenceInput = {
     audioReferences?: ReferenceAudio[];
     firstFrame?: ReferenceImage | null;
     lastFrame?: ReferenceImage | null;
+    /** A finished MiniMax-H3 768P video to regenerate at 2K together with its original inputs. */
+    baseVideo?: ReferenceVideo | null;
 };
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: VideoReferenceInput = {}, onProgress?: VideoProgressHandler, options: VideoTaskCreateOptions = {}): Promise<VideoResponse> {
@@ -83,7 +87,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         const createUrl = !accountProxy && isGeminiConfig(config, model)
             ? geminiActionUrl(channel?.baseUrl || config.baseUrl, model, "predictLongRunning")
             : !accountProxy && isMiniMaxH3Config(config, model)
-                ? miniMaxApiUrl(config, "/v2/video_generation")
+                ? miniMaxApiUrl(config, references.baseVideo ? "/v2/video_regeneration" : "/v2/video_generation")
                 : aiApiUrl(config, accountProxy ? "/videos" : isArkVideoConfig(config, model) ? "/contents/generations/tasks" : isCogVideoX3Model(model) ? "/videos/generations" : "/videos");
         const requestBody = !accountProxy && isGeminiConfig(config, model) ? withoutVideoModel(body) : body;
         const created = unwrapVideoResponseForConfig(config, model, (await axios.post<ApiVideoResponse>(createUrl, requestBody, { headers })).data);
@@ -103,6 +107,36 @@ export async function pollVideoGenerationTaskStatus(config: AiConfig, task: Vide
     if (!pollId) throw new VideoRequestError("视频接口没有返回任务 ID", task);
     const result = unwrapVideoResponseForConfig(config, model, (await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
     return syncGeneratedVideo(await cacheProtectedGeminiVideo(config, model, result), config, true);
+}
+
+/** MiniMax asks clients to query tasks every 10 seconds; other providers keep the 5-second polling tick. */
+export function isVideoPollDue(config: AiConfig, model: string, lastPolledAt?: number, now = Date.now()) {
+    return !lastPolledAt || !isMiniMaxH3Config(config, model) || now - lastPolledAt >= MINIMAX_POLL_INTERVAL_MS - VIDEO_POLL_INTERVAL_MS / 2;
+}
+
+/** Runs MiniMax H3-Context-IR on the prompt and its frames or references, resolving the enhanced prompt. */
+export async function optimizeMiniMaxPrompt(config: AiConfig, prompt: string, references: VideoReferenceInput = {}) {
+    config = normalizeVideoConfig(config, videoReferenceMode(references));
+    const model = config.model || config.videoModel;
+    if (!isMiniMaxH3Config(config, model) || !isMiniMaxH3BaseModel(model)) throw new VideoRequestError("仅 MiniMax 官方渠道的 MiniMax-H3 支持 AI 优化提示词");
+    try {
+        const accountProxy = usesAccountProxy(config);
+        const content = await miniMaxContent(model, prompt, normalizeVideoReferenceInput(references));
+        const body = { model: accountProxy ? MINIMAX_CONTEXT_IR_MODEL : model, content, duration: Number(config.videoSeconds), ratio: config.size };
+        const createUrl = accountProxy ? aiApiUrl(config, "/videos") : miniMaxApiUrl(config, "/v2/h3_context_ir");
+        let task = unwrapVideoResponseForConfig(config, model, (await axios.post<ApiVideoResponse>(createUrl, body, { headers: aiHeaders(config) })).data);
+        if (!task.id) throw new VideoRequestError("提示词优化接口没有返回任务 ID", task);
+        for (let attempt = 0; attempt < MINIMAX_PROMPT_MAX_POLLS; attempt++) {
+            if (attempt) await new Promise((resolve) => setTimeout(resolve, MINIMAX_POLL_INTERVAL_MS));
+            task = await pollVideoGenerationTaskStatus(config, task);
+            if (task.prompt) return task.prompt;
+            if (isFailedTask(task.status)) throw new VideoRequestError(task.error?.message || "提示词优化失败", task);
+        }
+        throw new VideoRequestError("提示词优化超时，请稍后重试", task);
+    } catch (error) {
+        const { message, detail } = readAxiosError(error, "提示词优化失败");
+        throw new VideoRequestError(message, detail);
+    }
 }
 
 function videoSyncKey(config: AiConfig, task: VideoResponse) {
@@ -162,6 +196,7 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    if (input.baseVideo && !(isMiniMaxH3Config(config, model) && isMiniMaxH3BaseModel(model))) throw new VideoRequestError("仅 MiniMax 官方渠道的 MiniMax-H3 支持 2K 重生成");
     if (isArkVideoConfig(config, model)) return createArkSeedanceVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSizeValue(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
@@ -251,6 +286,23 @@ async function arkMediaReferenceUrl(media: ReferenceVideo | ReferenceAudio) {
 }
 
 async function createMiniMaxH3VideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    const content = await miniMaxContent(model, prompt, input);
+    const body: Record<string, unknown> = input.baseVideo
+        ? { model: usesAccountProxy(config) ? MINIMAX_REGENERATION_MODEL : model, resolution: "2K", content: [...content, { type: "video_url", video_url: { url: await miniMaxBaseVideoUrl(input.baseVideo) }, role: "base_video" }] }
+        : { model, content, resolution: config.vquality, duration: Number(config.videoSeconds), ratio: config.size };
+    if (boolConfig(config.videoWatermark, false)) body.aigc_watermark = true;
+    if (new Blob([JSON.stringify(body)]).size > MINIMAX_REQUEST_MAX_BYTES) throw new VideoRequestError("MiniMax 请求体不能超过 64MB，请使用公网素材地址");
+    return body;
+}
+
+async function miniMaxBaseVideoUrl(video: ReferenceVideo) {
+    const url = publicHttpUrl(await resolveMediaUrl(video.storageKey, video.url)) || publicHttpUrl(video.url);
+    if (!url) throw new VideoRequestError("2K 重生成需要可公网访问的视频地址，请先同步到云端");
+    return url;
+}
+
+/** Builds the shared MiniMax content array used by video generation, Context-IR and regeneration. */
+async function miniMaxContent(model: string, prompt: string, input: Required<VideoReferenceInput>) {
     const hasFrames = Boolean(input.firstFrame || input.lastFrame);
     const hasReferences = Boolean(input.references.length || input.videoReferences.length || input.audioReferences.length);
     const inputError = miniMaxVideoInputError(model, prompt, input);
@@ -274,16 +326,7 @@ async function createMiniMaxH3VideoRequestBody(config: AiConfig, model: string, 
         videos.forEach((url) => content.push({ type: "video_url", video_url: { url }, role: "reference_video" }));
         audios.forEach((url) => content.push({ type: "audio_url", audio_url: { url }, role: "reference_audio" }));
     }
-
-    const body = {
-        model,
-        content,
-        resolution: config.vquality,
-        duration: Number(config.videoSeconds),
-        ratio: config.size,
-    };
-    if (new Blob([JSON.stringify(body)]).size > MINIMAX_REQUEST_MAX_BYTES) throw new VideoRequestError("MiniMax 请求体不能超过 64MB，请使用公网素材地址");
-    return body;
+    return content;
 }
 
 async function miniMaxReferenceValue(value: Promise<string | File>, kind: keyof typeof miniMaxMediaLimits) {
@@ -311,7 +354,7 @@ async function createCogVideoX3RequestBody(config: AiConfig, model: string, prom
 }
 
 function normalizeVideoReferenceInput(input: VideoReferenceInput): Required<VideoReferenceInput> {
-    return { references: input.references || [], videoReferences: input.videoReferences || [], audioReferences: input.audioReferences || [], firstFrame: input.firstFrame || null, lastFrame: input.lastFrame || null };
+    return { references: input.references || [], videoReferences: input.videoReferences || [], audioReferences: input.audioReferences || [], firstFrame: input.firstFrame || null, lastFrame: input.lastFrame || null, baseVideo: input.baseVideo || null };
 }
 
 async function imageReferenceToFormValue(image: ReferenceImage) {
@@ -421,11 +464,13 @@ function unwrapVideoResponseForConfig(config: AiConfig, model: string, payload: 
         if (task) {
             const content = task.content && typeof task.content === "object" ? task.content as Record<string, unknown> : {};
             const videoUrl = firstString(content.url, task.video_url);
-            if (isCompletedTask(firstString(task.status)) && !videoUrl) throw new VideoRequestError("MiniMax 视频生成完成但没有返回视频地址", payload);
+            const prompt = firstString(content.prompt);
+            if (isCompletedTask(firstString(task.status)) && !videoUrl && !prompt) throw new VideoRequestError("MiniMax 视频生成完成但没有返回视频地址", payload);
             return normalizeVideoResponse({
                 ...task,
                 task_id: firstString(task.id),
                 video_url: videoUrl,
+                prompt: prompt || undefined,
                 seconds: task.duration == null ? undefined : String(task.duration),
                 size: firstString(task.ratio, task.size),
             });

@@ -282,6 +282,7 @@ func SelectModelChannel(modelName string) (model.ModelChannel, error) {
 }
 
 func SelectModelChannelForModel(modelName string, channelID string) (model.ModelChannel, error) {
+	modelName = MiniMaxChannelModelName(modelName)
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return model.ModelChannel{}, err

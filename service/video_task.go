@@ -12,6 +12,7 @@ import (
 )
 
 const videoTaskPollInterval = 5 * time.Second
+const miniMaxVideoTaskPollInterval = 10 * time.Second
 const videoTaskFinishedRetention = 10 * time.Minute
 const videoTaskCleanupInterval = 10 * time.Minute
 
@@ -227,6 +228,9 @@ func runVideoTaskPoller() {
 				lastCleanupAt = current
 			}
 			for _, task := range tasks {
+				if !videoTaskPollDue(task, current) {
+					continue
+				}
 				if _, loaded := inFlight.LoadOrStore(task.ID, true); loaded {
 					continue
 				}
@@ -258,6 +262,15 @@ func currentVideoTaskPoller() VideoTaskPollFunc {
 
 func waitForNextVideoTaskPoll() {
 	time.Sleep(videoTaskPollInterval)
+}
+
+// videoTaskPollDue spaces MiniMax queries to the official 10-second guidance on the shared 5-second loop.
+func videoTaskPollDue(task model.VideoTask, at time.Time) bool {
+	if !IsMiniMaxTaskModelName(task.Model) {
+		return true
+	}
+	polledAt, err := time.Parse(time.RFC3339Nano, task.LastPolledAt)
+	return err != nil || at.Sub(polledAt) >= miniMaxVideoTaskPollInterval-videoTaskPollInterval/2
 }
 
 func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) error {

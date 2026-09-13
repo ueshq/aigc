@@ -3,6 +3,7 @@
 import type { ReferenceImage, ReferenceAudio } from "@/types/media";
 import { isCompletedTask, isFailedTask } from "@/services/api/ai-request";
 import { normalizeVideoConfig, videoDurationHint, validateVideoDuration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { isMiniMaxH3Config } from "@/lib/minimax-video";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
@@ -14,7 +15,7 @@ import { saveAs } from "file-saver";
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
 import { createCanvasImageTask, pollCanvasImageTaskStatus, requestImageQuestion, type CanvasImageTask } from "@/services/api/image";
 import { createCanvasAudioTask, pollCanvasAudioTaskStatus, type CanvasAudioTask } from "@/services/api/audio";
-import { isCompletedVideoTask, createVideoGenerationTask, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, type VideoResponse } from "@/services/api/video";
+import { isCompletedVideoTask, createVideoGenerationTask, isVideoPollDue, optimizeMiniMaxPrompt, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, type VideoResponse } from "@/services/api/video";
 import { channelProtocolForConfig, defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { collectImageStorageKeys, deleteStoredImages, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
 import { downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
@@ -610,13 +611,15 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     useEffect(() => {
         if (!projectLoaded) return;
+        const videoPolledAt = new Map<string, number>();
         const pollCanvasTasks = () => {
             const videoTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && canvasVideoTaskId(node.metadata));
             videoTargets.forEach((node) => {
                 if (pollingVideoNodeIdsRef.current.has(node.id)) return;
                 const taskId = canvasVideoTaskId(node.metadata);
                 const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
-                if (!taskId || !isAiConfigReady(generationConfig, generationConfig.model)) return;
+                if (!taskId || !isAiConfigReady(generationConfig, generationConfig.model) || !isVideoPollDue(generationConfig, generationConfig.model, videoPolledAt.get(node.id))) return;
+                videoPolledAt.set(node.id, Date.now());
                 pollingVideoNodeIdsRef.current.add(node.id);
                 void pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromMetadata(node.metadata))
                     .then((task) => {
@@ -3698,8 +3701,69 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [agentEffectiveConfig, createGroupFromSelection, currentProject?.title, deleteConnection, deleteNodes, getCanvasCenter, handleGenerateNode, isAiConfigReady, projectId, renameProject, resolvedAgentConfig.autoGenerateMedia, updateProject],
     );
 
+    const handleRegenerateVideo2K = useCallback(
+        async (sourceVideo: CanvasNodeData, retryTarget?: CanvasNodeData) => {
+            const metadata = sourceVideo.metadata;
+            if (sourceVideo.type !== CanvasNodeType.Video || !metadata?.content) {
+                message.error("原视频已不存在，无法 2K 重生成");
+                return;
+            }
+            const upstream = findRetrySourceNode(sourceVideo.id, nodesRef.current, connectionsRef.current) || sourceVideo;
+            const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(upstream.id, nodesRef.current, connectionsRef.current, upstream.metadata?.prompt || metadata.prompt || ""));
+            const prompt = (context.prompt || metadata.prompt || "").trim();
+            const config = normalizeVideoConfig({ ...buildGenerationConfig(effectiveConfig, sourceVideo, "video"), vquality: "2K" }, context.firstFrame || context.lastFrame ? "frames" : context.referenceImages.length || context.referenceVideos.length || context.referenceAudios.length ? "reference" : "text");
+            if (!isAiConfigReady(config, config.model)) {
+                openConfigDialog(true);
+                return;
+            }
+            if (!prompt || !isMiniMaxH3Config(config, config.model)) {
+                message.error(prompt ? "仅 MiniMax 官方渠道的 MiniMax-H3 支持 2K 重生成" : "找不到原视频提示词，无法 2K 重生成");
+                return;
+            }
+            const targetId = retryTarget?.id || nanoid();
+            const clientTaskId = `client_video_task_${targetId}`;
+            const startedAt = Date.now();
+            const size = { width: sourceVideo.width, height: sourceVideo.height };
+            const loadingMetadata = { ...metadata, content: undefined, storageKey: "", vquality: config.vquality, status: NODE_STATUS_LOADING, errorDetails: undefined, progress: 0, startedAt, videoTaskId: clientTaskId, videoTaskVideoId: undefined, regenerateSourceNodeId: sourceVideo.id };
+            if (retryTarget) {
+                setNodes((prev) => prev.map((item) => (item.id === targetId ? { ...item, metadata: { ...item.metadata, ...loadingMetadata } } : item)));
+            } else {
+                setNodes((prev) => [...prev, { id: targetId, type: CanvasNodeType.Video, title: `${sourceVideo.title || "视频"} · 2K`, position: { x: sourceVideo.position.x + sourceVideo.width + 96, y: sourceVideo.position.y }, ...size, metadata: loadingMetadata }]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceVideo.id, toNodeId: targetId }]);
+            }
+            try {
+                const created = await createVideoGenerationTask(config, applyCameraPrompt(prompt, metadata.cameraControl), { references: context.referenceImages, firstFrame: context.firstFrame, lastFrame: context.lastFrame, videoReferences: context.referenceVideos, audioReferences: context.referenceAudios, baseVideo: { id: sourceVideo.id, name: "base-video.mp4", type: metadata.mimeType || "video/mp4", url: metadata.content, storageKey: metadata.storageKey } }, undefined, { clientTaskId, source: "canvas", sourceId: targetId });
+                setNodes((prev) => applyCanvasVideoTaskUpdate(prev, targetId, created, config, startedAt, size));
+            } catch (error) {
+                const errorDetails = error instanceof Error ? error.message : "2K 重生成失败";
+                setNodes((prev) => prev.map((item) => (item.id === targetId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+            }
+        },
+        [effectiveConfig, isAiConfigReady, message, openConfigDialog],
+    );
+
+    const handleOptimizeNodePrompt = useCallback(
+        async (nodeId: string, prompt: string) => {
+            const node = nodesRef.current.find((item) => item.id === nodeId);
+            const config = buildGenerationConfig(effectiveConfig, node, "video");
+            if (!isAiConfigReady(config, config.model)) {
+                openConfigDialog(true);
+                throw new Error("请先完成模型配置");
+            }
+            const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, prompt));
+            return optimizeMiniMaxPrompt(config, context.prompt, { references: context.referenceImages, firstFrame: context.firstFrame, lastFrame: context.lastFrame, videoReferences: context.referenceVideos, audioReferences: context.referenceAudios });
+        },
+        [effectiveConfig, isAiConfigReady, openConfigDialog],
+    );
+
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
+            if (node.type === CanvasNodeType.Video && node.metadata?.regenerateSourceNodeId) {
+                const sourceVideo = nodesRef.current.find((item) => item.id === node.metadata?.regenerateSourceNodeId);
+                if (sourceVideo) await handleRegenerateVideo2K(sourceVideo, node);
+                else message.error("原视频已不存在，无法 2K 重生成");
+                return;
+            }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const isPanorama = isPanoramaNodeType(node.type);
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
@@ -3807,7 +3871,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, message, openConfigDialog, projectId],
+        [effectiveConfig, handleRegenerateVideo2K, message, openConfigDialog, projectId],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -4114,6 +4178,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         onPromptChange={handleNodePromptChange}
                                         onConfigChange={handleConfigNodeChange}
                                         onGenerate={handleGenerateNode}
+                                        onOptimizePrompt={handleOptimizeNodePrompt}
                                         onDisconnectReference={disconnectNodeReference}
                                         onStartReferenceSelection={startNodeReferenceSelection}
                                         onImageSettingsOpenChange={(open) => {
@@ -4250,6 +4315,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
+                    onRegenerate2K={(node) => void handleRegenerateVideo2K(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                 />

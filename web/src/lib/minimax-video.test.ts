@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { miniMaxModels, miniMaxVideoInputError, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeMiniMaxVideoConfig, type MiniMaxVideoReferences } from "./minimax-video";
+import { isMiniMaxH3BaseModel, miniMaxModels, miniMaxVideoInputError, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeMiniMaxVideoConfig, type MiniMaxVideoReferences } from "./minimax-video";
 import { buildGenerationConfig, videoConfigPatch } from "../app/(user)/canvas/components/canvas-node-generation";
 import { CanvasNodeType, type CanvasNodeData } from "../app/(user)/canvas/types";
 import { PANORAMA_IMAGE_SIZE } from "../app/(user)/canvas/utils/canvas-panorama";
@@ -14,6 +14,8 @@ const empty: MiniMaxVideoReferences = { references: [], videoReferences: [], aud
 
 test("official model defaults, limits and mode ratios", () => {
     assert.deepEqual(miniMaxModels, ["MiniMax-H3", "MiniMax-H3-Max"]);
+    assert.ok(isMiniMaxH3BaseModel(" minimax-h3 "));
+    assert.ok(!isMiniMaxH3BaseModel("MiniMax-H3-Max"));
     for (const [model, minimum] of [["MiniMax-H3", 4], ["MiniMax-H3-Max", 5]] as const) {
         assert.equal(normalizeMiniMaxH3Duration("", model), 5);
         assert.equal(normalizeMiniMaxH3Duration("2", model), minimum);
@@ -35,6 +37,8 @@ test("model switching normalizes values only for the official channel", () => {
     assert.equal(normalized.vquality, "768P");
     assert.equal(normalized.videoSeconds, "5");
     assert.equal(normalized.size, "16:9");
+    assert.equal(normalized.videoWatermark, "false");
+    assert.equal(normalizeMiniMaxVideoConfig({ ...config, videoWatermark: "true" }).videoWatermark, "true");
     const compatible = { ...config, localChannels: [{ ...channel, protocol: "openai" as const }] };
     assert.equal(normalizeMiniMaxVideoConfig(compatible), compatible);
 });

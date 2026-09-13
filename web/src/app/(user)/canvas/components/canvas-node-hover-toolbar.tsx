@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Sparkles, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { isMiniMaxH3BaseModel, isMiniMaxH3Config, normalizeMiniMaxH3Resolution } from "@/lib/minimax-video";
+import { useEffectiveConfig } from "@/stores/use-config-store";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "../types";
+import { buildGenerationConfig } from "./canvas-node-generation";
 import { isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, PANORAMA_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, defaultPanoramaQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
@@ -39,6 +42,7 @@ type CanvasNodeHoverToolbarProps = {
     onViewImage: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
+    onRegenerate2K: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
 };
@@ -79,6 +83,7 @@ export function CanvasNodeHoverToolbar({
     onViewImage,
     onReversePrompt,
     onRetry,
+    onRegenerate2K,
     onToggleFreeResize,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
@@ -91,6 +96,7 @@ export function CanvasNodeHoverToolbar({
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
+    const globalConfig = useEffectiveConfig();
     const isPanorama = isPanoramaNodeType(node?.type);
     const quickToolsStorageKey = isPanorama ? PANORAMA_QUICK_TOOLS_STORAGE_KEY : IMAGE_QUICK_TOOLS_STORAGE_KEY;
     const { ids: quickImageToolIds, showLabels: showImageToolLabels } = quickToolsConfigs[quickToolsStorageKey];
@@ -136,6 +142,7 @@ export function CanvasNodeHoverToolbar({
     const isConfig = node.type === CanvasNodeType.Config;
     const canOpenDialog = isText || hasImage || isVideo;
     const canRetry = node.metadata?.status === "error";
+    const canRegenerate2K = hasVideo && isMiniMaxH3BaseModel(node.metadata?.model) && normalizeMiniMaxH3Resolution(node.metadata?.vquality || "") === "768P" && isMiniMaxH3Config(buildGenerationConfig(globalConfig, node, "video"), "MiniMax-H3");
     const quickImageToolIdSet = new Set(quickImageToolIds);
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = (isPanoramaNodeType(target.type) ? target.metadata?.panoramaSourcePrompt : target.metadata?.prompt)?.trim();
@@ -160,6 +167,7 @@ export function CanvasNodeHoverToolbar({
     ];
     const nodeToolbarTools: ToolbarTool[] = [
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
+        ...(canRegenerate2K ? [{ id: "regenerate2k", title: "MiniMax 2K 重生成", label: "2K 重生成", icon: <Sparkles className="size-4" />, onClick: () => onRegenerate2K(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...((hasVideo || hasAudio) && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadMediaToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadMediaToCloud(node) }] : []),
         ...(hasImage && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadImageToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadImageToCloud(node) }] : []),

@@ -18,6 +18,10 @@ func TestModelProtocolProxyPathContract(t *testing.T) {
 		{"minimax create", "minimax", "https://api.minimax.io", "MiniMax-H3", "/videos", "/v2/video_generation"},
 		{"minimax max create", "minimax", "https://api.minimax.io", "MiniMax-H3-Max", "/videos", "/v2/video_generation"},
 		{"minimax query", "minimax", "", "MiniMax-H3-Max", "/videos/task a?b", "/v2/query/video_generation/task%20a%3Fb"},
+		{"minimax context-ir create", "minimax", "https://api.minimax.io", "MiniMax-H3-Context-IR", "/videos", "/v2/h3_context_ir"},
+		{"minimax regeneration create", "minimax", "https://api.minimax.io", "MiniMax-H3-Regenerate-2K", "/videos", "/v2/video_regeneration"},
+		{"minimax regeneration query", "minimax", "", "MiniMax-H3-Regenerate-2K", "/videos/job", "/v2/query/video_generation/job"},
+		{"openai keeps internal MiniMax name", "openai", "", "MiniMax-H3-Context-IR", "/videos", "/videos"},
 		{"cog create", "openai", "", " COGVIDEOX-3 ", "/videos", "/videos/generations"},
 		{"openai seedance unchanged", "openai", "", "doubao-seedance-2", "/videos", "/videos"},
 		{"openai plan URL unchanged", "openai", "https://api.example/API/PLAN/V3", "deployment-id", "/videos", "/videos"},
@@ -84,6 +88,17 @@ func TestModelProtocolProxyPreparationOrder(t *testing.T) {
 		{
 			name: "Gemini video strips model", protocol: "gemini", model: "veo", endpoint: "/videos", mode: aiProtocolVideoRequest,
 			body: `{"model":"veo","instances":[]}`, wantPath: "/v1beta/models/veo:predictLongRunning", wantLabel: "Gemini", wantBody: `{"instances":[]}`,
+		},
+		{
+			name: "MiniMax regeneration sends MiniMax-H3", protocol: "minimax", model: "MiniMax-H3-Regenerate-2K", endpoint: "/videos", mode: aiProtocolVideoRequest,
+			body:     `{"model":"MiniMax-H3-Regenerate-2K","resolution":"2K","content":[{"type":"text","text":"scene"},{"type":"video_url","video_url":{"url":"https://media.example/base.mp4"},"role":"base_video"}]}`,
+			wantPath: "/v2/video_regeneration", wantLabel: "MiniMax",
+			wantBody: `{"model":"MiniMax-H3","resolution":"2K","content":[{"type":"text","text":"scene"},{"type":"video_url","video_url":{"url":"https://media.example/base.mp4"},"role":"base_video"}]}`,
+		},
+		{
+			name: "MiniMax Context-IR keeps text ratio rule", protocol: "minimax", model: "MiniMax-H3-Context-IR", endpoint: "/videos", mode: aiProtocolVideoRequest,
+			body:     `{"model":"MiniMax-H3-Context-IR","content":[{"type":"text","text":"scene"}],"duration":5,"ratio":"adaptive"}`,
+			wantPath: "/v2/h3_context_ir", wantLabel: "MiniMax", wantError: "MiniMax 文生视频需要指定画面比例",
 		},
 		{
 			name: "compatible passthrough", protocol: "unknown", model: "future-model", endpoint: "/chat/completions", body: `not JSON`,

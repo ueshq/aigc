@@ -8,7 +8,8 @@ import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
 import { ChannelModelSelectorModal } from "@/components/channel-model-selector-modal";
-import { modelChannelApiKeyUrls, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "@/lib/model-channel";
+import { MINIMAX_CONTEXT_IR_MODEL, MINIMAX_REGENERATION_MODEL } from "@/lib/minimax-video";
+import { modelChannelApiKeyUrls, modelChannelBaseUrlPresets, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "@/lib/model-channel";
 import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
 import { clearStorageConfigCache as clearMediaStorageConfigCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageConfigCache } from "@/services/image-storage";
@@ -81,6 +82,7 @@ export default function AdminSettingsPage() {
     const storageProviders = Form.useWatch(["private", "storage", "providers"], form) || [];
     const channelProtocol = Form.useWatch("protocol", channelForm);
     const channelApiKeyUrl = channelProtocol ? modelChannelApiKeyUrls[channelProtocol] : undefined;
+    const channelBaseUrlPresets = channelProtocol ? modelChannelBaseUrlPresets[channelProtocol] : undefined;
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
     const channelTableData = useMemo(() => channels.map((channel, index) => ({ ...channel, _index: index, _rowKey: `${index}-${channel.name}-${channel.baseUrl}` })), [channels]);
     const activeMode = editorMode[activeTab];
@@ -455,7 +457,7 @@ export default function AdminSettingsPage() {
                                             rowKey="model"
                                             pagination={false}
                                             size="small"
-                                            dataSource={publicModels.map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
+                                            dataSource={[...publicModels, ...(publicModels.includes("MiniMax-H3") ? [MINIMAX_CONTEXT_IR_MODEL, MINIMAX_REGENERATION_MODEL] : [])].map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
                                             columns={[
                                                 { title: "模型", dataIndex: "model" },
                                                 {
@@ -880,6 +882,7 @@ export default function AdminSettingsPage() {
                                         </span>
                                     }
                                     rules={[{ required: true, message: "请输入接口地址" }]}
+                                    extra={channelBaseUrlPresets ? <Space size={12} wrap>{channelBaseUrlPresets.map((item) => <Button key={item.value} type="link" size="small" className="!px-0" title={item.value} onClick={() => channelForm.setFieldValue("baseUrl", item.value)}>{item.label}</Button>)}</Space> : undefined}
                                 >
                                     <Input />
                                 </Form.Item>

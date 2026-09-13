@@ -4,7 +4,7 @@ import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/med
 "use client";
 import axios from "axios";
 
-import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, PanelBottom, PanelLeft, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, PanelBottom, PanelLeft, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Button, Checkbox, Empty, Input, Modal, Switch, Tag, Typography } from "antd";
 import localforage from "localforage";
@@ -18,13 +18,13 @@ import { isFailedTask, usesAccountProxy } from "@/services/api/ai-request";
 import { VideoSettingsPanel, videoResolutionLabel, videoResolutionOptions, videoSizeForResolution, videoSizeOptions } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { isMiniMaxH3Config, miniMaxVideoCapabilities, miniMaxVideoInputError, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
+import { isMiniMaxH3BaseModel, isMiniMaxH3Config, MINIMAX_REGENERATION_MODEL, miniMaxVideoCapabilities, miniMaxVideoInputError, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
 import { ARK_SEEDANCE_REFERENCE_LIMITS, boolConfig, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { modelKey, normalizeVideoConfig, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, videoReferenceMode, isAgnesVideoV25Model, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
-import { isCompletedVideoTask, createVideoGenerationTask, deleteVideoGenerationTask, listVideoGenerationTasks, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, VideoRequestError, type VideoResponse } from "@/services/api/video";
+import { isCompletedVideoTask, createVideoGenerationTask, deleteVideoGenerationTask, isVideoPollDue, listVideoGenerationTasks, optimizeMiniMaxPrompt, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, VideoRequestError, type VideoResponse } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { channelProtocolForConfig, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -56,6 +56,7 @@ type GenerationResult = {
     lastFrame?: ReferenceImage | null;
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    baseVideo?: ReferenceVideo | null;
     taskCount?: number;
     durationMs?: number;
     progress?: number;
@@ -79,6 +80,8 @@ type GenerationLog = {
     lastFrame?: ReferenceImage | null;
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    /** Base video of a MiniMax 2K regeneration, kept so retries regenerate instead of starting over. */
+    baseVideo?: ReferenceVideo | null;
     taskCount?: number;
     durationMs: number;
     size: string;
@@ -101,7 +104,7 @@ type AssetPickerTarget = "general" | "image" | "video" | "audio" | "firstFrame" 
 const WORKBENCH_LAYOUT_KEY = "infinite-canvas:video-workbench-layout";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 export default function VideoPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const firstFrameInputRef = useRef<HTMLInputElement>(null);
     const lastFrameInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +131,7 @@ export default function VideoPage() {
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
+    const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [workbenchLayout, setWorkbenchLayoutState] = useState<WorkbenchLayout>("side");
     const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -171,7 +175,7 @@ export default function VideoPage() {
             if (pollingLogIdsRef.current.has(log.id)) return;
             const resumeConfig = buildResumeVideoConfig(effectiveConfigRef.current, log);
             const taskId = videoLogTaskId(log);
-            if (!taskId || !isAiConfigReady(resumeConfig, log.model)) return;
+            if (!taskId || !isAiConfigReady(resumeConfig, log.model) || !isVideoPollDue(resumeConfig, log.model, log.lastPolledAt)) return;
             if (isLocalClientVideoLog(log) && !usesAccountProxy(resumeConfig)) return;
             void pollPendingLogOnce(log, resumeConfig);
         });
@@ -489,14 +493,14 @@ export default function VideoPage() {
         return { text, model: modelValue, config: normalizedConfig, ...input, taskCount: normalizeVideoCount(taskCountValue) };
     };
 
-    const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
+    const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; baseVideo?: ReferenceVideo | null; taskCount: number }) => {
         setRunning(true);
         setPreviewLog(null);
         setNow(Date.now());
         const pendingLogs = Array.from({ length: snapshot.taskCount }, () => {
             const clientTaskId = `client_video_task_${nanoid()}`;
             const task: VideoResponse = { id: clientTaskId, task_id: clientTaskId, model: snapshot.model, status: "queued", progress: 0, created_at: Date.now(), size: snapshot.config.size, seconds: snapshot.config.videoSeconds };
-            return buildLog({ prompt: snapshot.text, model: snapshot.model, config: snapshot.config, references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task, taskCount: snapshot.taskCount, lastPolledAt: Date.now() });
+            return buildLog({ prompt: snapshot.text, model: snapshot.model, config: snapshot.config, references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, baseVideo: snapshot.baseVideo, durationMs: 0, status: "生成中", task, taskCount: snapshot.taskCount, lastPolledAt: Date.now() });
         });
         await Promise.all(pendingLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
         setLogs((value) => sortVideoLogs([...pendingLogs, ...value]));
@@ -517,9 +521,9 @@ export default function VideoPage() {
         }
     };
 
-    const runVideoTask = async (pendingLog: GenerationLog, snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
+    const runVideoTask = async (pendingLog: GenerationLog, snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; baseVideo?: ReferenceVideo | null; taskCount: number }) => {
         try {
-            const created = await createVideoGenerationTask(snapshot.config, snapshot.text, { references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences }, (progress) => {
+            const created = await createVideoGenerationTask(snapshot.config, snapshot.text, { references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, baseVideo: snapshot.baseVideo }, (progress) => {
                 setResults((value) => updateResultByLogId(value, pendingLog.id, { progress }));
             }, { clientTaskId: pendingLog.task?.id, source: "video-workbench" });
             const nextLog = { ...pendingLog, task: created, lastPolledAt: Date.now() };
@@ -541,7 +545,7 @@ export default function VideoPage() {
         const snapshot = buildRequestSnapshot({ promptText: result.prompt, referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...videoConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model });
         if (!snapshot) return;
         setResults((value) => value.filter((item) => item.id !== result.id));
-        void submitGenerationSnapshot(snapshot);
+        void submitGenerationSnapshot({ ...snapshot, baseVideo: result.baseVideo });
     };
 
     const previewGenerationResult = (result: GenerationResult) => {
@@ -843,11 +847,39 @@ export default function VideoPage() {
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
     };
 
-    const retryGenerationLog = (log: GenerationLog) => {
+    const buildLogSnapshot = (log: GenerationLog, configPatch: Partial<AiConfig> = {}) => {
         const retryChannelId = videoTaskChannelId(log.task);
-        const snapshot = buildRequestSnapshot({ promptText: log.prompt, referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...videoConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model }, modelValue: log.model });
+        return buildRequestSnapshot({ promptText: log.prompt, referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...videoConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model, ...configPatch }, modelValue: log.model });
+    };
+
+    const retryGenerationLog = (log: GenerationLog) => {
+        const snapshot = buildLogSnapshot(log);
+        if (snapshot) void submitGenerationSnapshot({ ...snapshot, baseVideo: log.baseVideo });
+    };
+
+    const regenerateLog2K = (log: GenerationLog) => {
+        const video = log.video;
+        const snapshot = video ? buildLogSnapshot(log, { vquality: "2K" }) : null;
+        if (!video || !snapshot) return;
+        if (!isMiniMaxH3Config(snapshot.config, snapshot.model)) {
+            message.error("仅 MiniMax 官方渠道的 MiniMax-H3 支持 2K 重生成");
+            return;
+        }
+        void submitGenerationSnapshot({ ...snapshot, baseVideo: { id: video.id, name: "base-video.mp4", type: video.mimeType || "video/mp4", url: video.url, storageKey: video.storageKey } });
+    };
+
+    const optimizePrompt = async () => {
+        const snapshot = buildRequestSnapshot({ taskCountValue: 1 });
         if (!snapshot) return;
-        void submitGenerationSnapshot(snapshot);
+        setOptimizingPrompt(true);
+        try {
+            const optimized = await optimizeMiniMaxPrompt(snapshot.config, snapshot.text, { references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences });
+            modal.confirm({ title: "AI 优化提示词", icon: null, width: 720, okText: "替换提示词", cancelText: "保留原提示词", content: <div className="thin-scrollbar max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm">{optimized}</div>, onOk: () => setPrompt(optimized) });
+        } catch (error) {
+            message.error(errorMessage(error));
+        } finally {
+            setOptimizingPrompt(false);
+        }
     };
 
     return (
@@ -892,6 +924,8 @@ export default function VideoPage() {
                             onMoveVideoReference={(index, offset) => setVideoReferences((value) => moveListItem(value, index, offset))}
                             onRemoveAudioReference={(id) => void removeAudioReference(id)}
                             onMoveAudioReference={(index, offset) => setAudioReferences((value) => moveListItem(value, index, offset))}
+                            optimizingPrompt={optimizingPrompt}
+                            onOptimizePrompt={() => void optimizePrompt()}
                             onGenerate={() => void generate()}
                         />
                         <ResultsPanel
@@ -910,6 +944,7 @@ export default function VideoPage() {
                             }}
                             onPreviewLog={previewGenerationLog}
                             onRetryLog={retryGenerationLog}
+                            onRegenerateLog2K={regenerateLog2K}
                             onPreviewResult={previewGenerationResult}
                             onRetryResult={retryResult}
                             onCopyPrompt={(value) => void copyPrompt(value, (content) => message.success(content))}
@@ -939,6 +974,7 @@ export default function VideoPage() {
                             }}
                             onPreviewLog={previewGenerationLog}
                             onRetryLog={retryGenerationLog}
+                            onRegenerateLog2K={regenerateLog2K}
                             onPreviewResult={previewGenerationResult}
                             onRetryResult={retryResult}
                             onCopyPrompt={(value) => void copyPrompt(value, (content) => message.success(content))}
@@ -985,6 +1021,8 @@ export default function VideoPage() {
                             onMoveVideoReference={(index, offset) => setVideoReferences((value) => moveListItem(value, index, offset))}
                             onRemoveAudioReference={(id) => void removeAudioReference(id)}
                             onMoveAudioReference={(index, offset) => setAudioReferences((value) => moveListItem(value, index, offset))}
+                            optimizingPrompt={optimizingPrompt}
+                            onOptimizePrompt={() => void optimizePrompt()}
                             onGenerate={() => void generate()}
                             bottomSettingsCollapsed={bottomSettingsCollapsed}
                             setBottomSettingsCollapsed={setBottomSettingsCollapsed}
@@ -1069,6 +1107,8 @@ function WorkbenchPanel({
     onMoveVideoReference,
     onRemoveAudioReference,
     onMoveAudioReference,
+    optimizingPrompt,
+    onOptimizePrompt,
     onGenerate,
     bottomSettingsCollapsed = true,
     setBottomSettingsCollapsed,
@@ -1110,6 +1150,8 @@ function WorkbenchPanel({
     onMoveVideoReference: (index: number, offset: number) => void;
     onRemoveAudioReference: (id: string) => void;
     onMoveAudioReference: (index: number, offset: number) => void;
+    optimizingPrompt: boolean;
+    onOptimizePrompt: () => void;
     onGenerate: () => void;
     bottomSettingsCollapsed?: boolean;
     setBottomSettingsCollapsed?: (value: boolean) => void;
@@ -1121,6 +1163,7 @@ function WorkbenchPanel({
     const audioGenerationEnabled = !isMiniMaxH3Config(config, model) && supportsVideoAudioGeneration(model, channelProtocolForConfig({ ...config, model, videoModel: model }));
     const generateAudio = boolConfig(config.videoGenerateAudio, false);
     const miniMax = isMiniMaxH3Config(config, model) ? miniMaxVideoCapabilities(model) : null;
+    const canOptimizePrompt = Boolean(miniMax) && isMiniMaxH3BaseModel(model);
     const bottomSettingsGridClass = audioGenerationEnabled ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.7fr_auto_auto]";
 
     if (layout === "bottom") {
@@ -1142,6 +1185,7 @@ function WorkbenchPanel({
                             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
                                 <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
+                                {canOptimizePrompt ? <Button title="AI 优化提示词" icon={<WandSparkles className="size-4" />} loading={optimizingPrompt} disabled={!prompt.trim()} onClick={onOptimizePrompt} /> : null}
                                 <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={() => onOpenAssetPicker()} />
                                 <Button title="参数配置" className={`lg:hidden ${!bottomSettingsCollapsed ? "!border-sky-500/30 !bg-sky-500/10 !text-sky-500" : ""}`} icon={<SlidersHorizontal className="size-4" />} onClick={() => setBottomSettingsCollapsed?.(!bottomSettingsCollapsed)} />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
@@ -1197,6 +1241,7 @@ function WorkbenchPanel({
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPastePrompt}>读取剪贴板</Button>
                             <Button size="small" icon={<Trash2 className="size-3.5" />} onClick={onClearPrompt}>清空</Button>
                             <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={onOpenPromptLibrary}>提示词库</Button>
+                            {canOptimizePrompt ? <Button size="small" icon={<WandSparkles className="size-3.5" />} loading={optimizingPrompt} disabled={!prompt.trim()} onClick={onOptimizePrompt}>AI 优化</Button> : null}
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker()}>我的素材</Button>
                         </div>
                         <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
@@ -1482,6 +1527,7 @@ function ResultsPanel({
     onDeleteLog,
     onPreviewLog,
     onRetryLog,
+    onRegenerateLog2K,
     onPreviewResult,
     onRetryResult,
     onCopyPrompt,
@@ -1504,6 +1550,7 @@ function ResultsPanel({
     onDeleteLog: (log: GenerationLog) => void;
     onPreviewLog: (log: GenerationLog) => void;
     onRetryLog: (log: GenerationLog) => void;
+    onRegenerateLog2K: (log: GenerationLog) => void;
     onPreviewResult: (result: GenerationResult) => void;
     onRetryResult: (result: GenerationResult) => void;
     onCopyPrompt: (text: string) => void | Promise<void>;
@@ -1540,7 +1587,7 @@ function ResultsPanel({
                 <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                     {visibleResults.map((result, index) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} result={result} video={result.video} index={index} syncing={syncingVideoIds.includes(result.video.id)} onCopyPrompt={onCopyPrompt} onDownload={onDownload} onSync={(video) => onSyncResult(result.id, video, index)} onSaveAsset={onSaveAsset} /> : result.status === "failed" ? <FailedVideoCard key={result.id} result={result} error={result.error || "生成失败"} onCopyPrompt={onCopyPrompt} onPreview={() => onPreviewResult(result)} onRetry={() => onRetryResult(result)} /> : <PendingVideoCard key={result.id} result={result} now={now} onCopyPrompt={onCopyPrompt} />))}
                     {visibleLogs.map((log, index) => (
-                        <HistoryLogCard key={log.id} log={log} index={index} selected={selectedLogIds.includes(log.id)} active={activeLogId === log.id} syncing={Boolean(log.video && syncingVideoIds.includes(log.video.id))} onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))} onDelete={() => onDeleteLog(log)} onPreview={() => onPreviewLog(log)} onRetry={() => onRetryLog(log)} onCopyPrompt={onCopyPrompt} onDownload={onDownload} onSync={(video) => onSyncLog(log, video, index)} onSaveAsset={onSaveAsset} />
+                        <HistoryLogCard key={log.id} log={log} index={index} selected={selectedLogIds.includes(log.id)} active={activeLogId === log.id} syncing={Boolean(log.video && syncingVideoIds.includes(log.video.id))} onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))} onDelete={() => onDeleteLog(log)} onPreview={() => onPreviewLog(log)} onRetry={() => onRetryLog(log)} onRegenerate2K={canRegenerateLog2K(log) ? () => onRegenerateLog2K(log) : undefined} onCopyPrompt={onCopyPrompt} onDownload={onDownload} onSync={(video) => onSyncLog(log, video, index)} onSaveAsset={onSaveAsset} />
                     ))}
                 </div>
             ) : (
@@ -1631,7 +1678,7 @@ function FailedVideoCard({ result, error, onCopyPrompt, onPreview, onRetry }: { 
     );
 }
 
-function HistoryLogCard({ log, index, selected, active, syncing, onSelectedChange, onDelete, onPreview, onRetry, onCopyPrompt, onDownload, onSync, onSaveAsset }: { log: GenerationLog; index: number; selected: boolean; active: boolean; syncing: boolean; onSelectedChange: (checked: boolean) => void; onDelete: () => void; onPreview: () => void; onRetry: () => void; onCopyPrompt: (text: string) => void | Promise<void>; onDownload: (video: GeneratedVideo) => void; onSync: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
+function HistoryLogCard({ log, index, selected, active, syncing, onSelectedChange, onDelete, onPreview, onRetry, onRegenerate2K, onCopyPrompt, onDownload, onSync, onSaveAsset }: { log: GenerationLog; index: number; selected: boolean; active: boolean; syncing: boolean; onSelectedChange: (checked: boolean) => void; onDelete: () => void; onPreview: () => void; onRetry: () => void; onRegenerate2K?: () => void; onCopyPrompt: (text: string) => void | Promise<void>; onDownload: (video: GeneratedVideo) => void; onSync: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     const [expanded, setExpanded] = useState(false);
     const [detailOpen, setDetailOpen] = useState(false);
     return (
@@ -1669,6 +1716,7 @@ function HistoryLogCard({ log, index, selected, active, syncing, onSelectedChang
                 <div className="flex flex-wrap gap-1">
                     <Button size="small" onClick={onPreview}>载入</Button>
                     <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={onRetry}>重试</Button>
+                    {onRegenerate2K ? <Button size="small" icon={<Sparkles className="size-3.5" />} onClick={onRegenerate2K}>2K 重生成</Button> : null}
                 </div>
                 {log.video ? <div className="flex shrink-0 gap-1"><Button size="small" title="同步到云端存储" icon={<CloudUpload className="size-3.5" />} loading={syncing} disabled={isCloudVideo(log.video)} onClick={() => onSync(log.video!)} /><Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(log.video!)} /><Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(log.video!)} /></div> : null}
             </div>
@@ -1770,6 +1818,7 @@ function createResultFromLog(log: GenerationLog, status: GenerationResult["statu
         lastFrame: log.lastFrame || null,
         videoReferences: log.videoReferences || [],
         audioReferences: log.audioReferences || [],
+        baseVideo: log.baseVideo,
         taskCount: log.taskCount,
         durationMs: log.durationMs,
         progress: log.task?.progress,
@@ -1926,7 +1975,7 @@ function videoLogBackendMergeKeys(log: GenerationLog) {
 
 function backendTaskToLog(task: VideoResponse, fallbackConfig: AiConfig): GenerationLog {
     const request = parseBackendVideoRequest(task.request_body);
-    const model = task.model || request.model || fallbackConfig.videoModel || fallbackConfig.model || "";
+    const model = (task.model === MINIMAX_REGENERATION_MODEL ? "MiniMax-H3" : task.model) || request.model || fallbackConfig.videoModel || fallbackConfig.model || "";
     const taskChannelId = videoTaskChannelId(task);
     const config = buildVideoConfig({ ...fallbackConfig, model, videoModel: model, activeChannelId: taskChannelId || fallbackConfig.activeChannelId, videoChannelId: taskChannelId || fallbackConfig.videoChannelId, size: request.size || fallbackConfig.size, vquality: request.resolution || fallbackConfig.vquality, videoSeconds: request.seconds || fallbackConfig.videoSeconds}, model);
     const createdAt = parseTaskTimestamp(task.createdAt ?? task.created_at) || Date.now();
@@ -1946,6 +1995,7 @@ function backendTaskToLog(task: VideoResponse, fallbackConfig: AiConfig): Genera
         lastFrame: null,
         videoReferences: [],
         audioReferences: [],
+        baseVideo: request.baseVideoUrl ? { id: "base-video", name: "base-video.mp4", type: "video/mp4", url: request.baseVideoUrl } : undefined,
         durationMs,
         size: task.size || request.size || config.size,
         resolution: request.resolution || config.vquality,
@@ -1993,6 +2043,7 @@ function parseBackendVideoRequest(value?: string) {
         size: pick("ratio", "size", "aspect_ratio"),
         resolution: pick("resolution") || normalizeVideoResolutionValue(pick("resolution_name", "vquality", "quality")),
         seconds: pick("seconds", "duration", "videoSeconds"),
+        baseVideoUrl: Array.isArray(parsed.content) ? fieldString(parseRecord(parseRecord(parsed.content.find((item) => parseRecord(item)?.role === "base_video"))?.video_url)?.url) : "",
     };
 }
 
@@ -2388,7 +2439,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     };
 }
 
-function buildLog({ prompt, model, config, references, firstFrame, lastFrame, videoReferences, audioReferences, taskCount, durationMs, status, task, video, error, errorDetail, lastPolledAt }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount?: number; durationMs: number; status: GenerationLog["status"]; task?: VideoResponse; video?: GeneratedVideo; error?: string; errorDetail?: string; lastPolledAt?: number }): GenerationLog {
+function buildLog({ prompt, model, config, references, firstFrame, lastFrame, videoReferences, audioReferences, baseVideo, taskCount, durationMs, status, task, video, error, errorDetail, lastPolledAt }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; baseVideo?: ReferenceVideo | null; taskCount?: number; durationMs: number; status: GenerationLog["status"]; task?: VideoResponse; video?: GeneratedVideo; error?: string; errorDetail?: string; lastPolledAt?: number }): GenerationLog {
     const logConfig = {
         channelMode: config.channelMode,
         activeChannelId: config.activeChannelId,
@@ -2414,6 +2465,7 @@ function buildLog({ prompt, model, config, references, firstFrame, lastFrame, vi
         lastFrame: lastFrame || null,
         videoReferences,
         audioReferences,
+        baseVideo,
         taskCount,
         durationMs,
         size: logConfig.size,
@@ -2435,6 +2487,10 @@ function buildVideoConfig(config: AiConfig, model: string, mode?: "text" | "fram
 
 function videoTaskChannelId(task?: VideoResponse | null) {
     return task?.userChannelId || task?.channelId || "";
+}
+
+function canRegenerateLog2K(log: GenerationLog) {
+    return log.status === "成功" && Boolean(log.video) && isMiniMaxH3BaseModel(log.model) && normalizeMiniMaxH3Resolution(log.resolution, log.model) === "768P";
 }
 
 function resolveVideoChannelId(config: AiConfig, model: string, ...preferredIds: Array<string | undefined>) {

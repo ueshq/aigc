@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { modelChannelApiKeyUrls, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "./model-channel";
+import { modelChannelApiKeyUrls, modelChannelBaseUrlPresets, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "./model-channel";
 
 test("built-in protocol options are shared by both settings panels", () => {
     assert.deepEqual(modelChannelProtocolOptions, [
@@ -23,5 +23,8 @@ test("built-in protocols use official default URLs and API Key links", () => {
     assert.deepEqual(modelChannelApiKeyUrls, {
         minimax: "https://platform.minimax.io",
         mimo: "https://platform.xiaomimimo.com/?ref=JFZQR2",
+    });
+    assert.deepEqual(modelChannelBaseUrlPresets, {
+        minimax: [{ label: "国际站", value: "https://api.minimax.io" }, { label: "国内站", value: "https://api.minimax.cn" }],
     });
 });

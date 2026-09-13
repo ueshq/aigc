@@ -53,7 +53,7 @@ type userLocalModelChannelInput struct {
 
 func SelectUserLocalModelChannelForModel(userID string, modelName string, channelID string) (model.ModelChannel, error) {
 	userID = strings.TrimSpace(userID)
-	modelName = strings.TrimSpace(modelName)
+	modelName = MiniMaxChannelModelName(strings.TrimSpace(modelName))
 	channelID = strings.TrimSpace(channelID)
 	if userID == "" {
 		return model.ModelChannel{}, errors.New("请先登录")

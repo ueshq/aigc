@@ -8,7 +8,7 @@ import { requestAudioGeneration } from "./audio";
 import { requestGeneration, requestImageQuestion, ImageRequestError } from "./image";
 import { requestCanvasAgentTurn } from "./canvas-agent";
 import { useUserStore } from "../../stores/use-user-store";
-import { createVideoGenerationTask, pollVideoGenerationTaskStatus, isCompletedVideoTask } from "./video";
+import { createVideoGenerationTask, pollVideoGenerationTaskStatus, isCompletedVideoTask, isVideoPollDue, optimizeMiniMaxPrompt } from "./video";
 
 function configFor(model: string, protocol: "minimax" | "openai" | "gemini" | "mimo" | "ark" = "minimax"): AiConfig {
     const channel = { id: "channel", name: "fixture", protocol, baseUrl: "https://api.minimax.io", apiKey: "test-key", models: [model] };
@@ -56,6 +56,8 @@ test("browser direct H3 requests and polling use official paths and Bearer auth"
         { type: "audio_url", audio_url: { url: audio.url }, role: "reference_audio" },
     ]);
     await assert.rejects(createVideoGenerationTask(configFor("MiniMax-H3-Max"), "scene", { audioReferences: [audio] }), /移除/);
+    await createVideoGenerationTask({ ...configFor("MiniMax-H3"), videoWatermark: "true" }, "scene");
+    assert.equal(createdBody.aigc_watermark, true);
 });
 
 test("query failures and missing output remain visible", async (context) => {
@@ -257,4 +259,70 @@ test("audio and Agent use selected channel credentials and reject cloud requests
     const agentConfig = { ...configFor("gpt-4.1", "openai"), textModel: "gpt-4.1", textChannelId: "channel" };
     const turn = await requestCanvasAgentTurn({ config: agentConfig, systemPrompt: "help", messages: [{ role: "user", content: "hello" }], tools: [], toolMode: "native" });
     assert.equal(turn.content, "answer");
+});
+
+test("MiniMax prompt optimization and 2K regeneration use official task endpoints", async (context) => {
+    const user = useUserStore.getState();
+    context.mock.method(useUserStore, "getState", () => ({ ...user, token: "" }));
+    context.mock.method(globalThis, "fetch", () => { throw new Error("unexpected network I/O"); });
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    context.mock.method(axios, "post", async (url: string, body: Record<string, unknown>, options: { headers: Record<string, string> }) => {
+        assert.equal(options.headers.Authorization, "Bearer test-key");
+        posts.push({ url, body });
+        return { data: { task_id: "job" } };
+    });
+    let payload: unknown;
+    context.mock.method(axios, "get", async (url: string) => {
+        assert.equal(url, "https://api.minimax.io/v2/query/video_generation/job");
+        return { data: payload };
+    });
+    const frame = { id: "frame", name: "frame.png", type: "image/png", dataUrl: "https://media.example/frame.png" };
+    payload = { task: { id: "job", status: "succeeded", task_type: "h3_context_ir", modality: "text", content: { prompt: "enhanced scene" } } };
+    assert.equal(await optimizeMiniMaxPrompt(configFor("MiniMax-H3"), "scene"), "enhanced scene");
+    assert.deepEqual(posts.at(-1), { url: "https://api.minimax.io/v2/h3_context_ir", body: { model: "MiniMax-H3", content: [{ type: "text", text: "scene" }], duration: 5, ratio: "16:9" } });
+    await optimizeMiniMaxPrompt(configFor("MiniMax-H3"), "scene", { firstFrame: frame });
+    assert.deepEqual(posts.at(-1)?.body, { model: "MiniMax-H3", content: [{ type: "text", text: "scene" }, { type: "image_url", image_url: { url: frame.dataUrl }, role: "first_frame" }], duration: 5, ratio: "adaptive" });
+    payload = { task: { id: "job", status: "failed", error: { code: "1026", message: "rejected" } } };
+    await assert.rejects(optimizeMiniMaxPrompt(configFor("MiniMax-H3"), "scene"), /rejected/);
+    await assert.rejects(optimizeMiniMaxPrompt(configFor("MiniMax-H3-Max"), "scene"), /MiniMax-H3/);
+    const baseVideo = { id: "base", name: "base.mp4", type: "video/mp4", url: "https://media.example/base.mp4" };
+    await createVideoGenerationTask({ ...configFor("MiniMax-H3"), vquality: "2K", videoWatermark: "true" }, "scene", { firstFrame: frame, baseVideo });
+    assert.deepEqual(posts.at(-1), {
+        url: "https://api.minimax.io/v2/video_regeneration",
+        body: { model: "MiniMax-H3", resolution: "2K", aigc_watermark: true, content: [{ type: "text", text: "scene" }, { type: "image_url", image_url: { url: frame.dataUrl }, role: "first_frame" }, { type: "video_url", video_url: { url: baseVideo.url }, role: "base_video" }] },
+    });
+    const count = posts.length;
+    await assert.rejects(createVideoGenerationTask(configFor("MiniMax-H3"), "scene", { baseVideo: { ...baseVideo, url: "data:video/mp4;base64,AA" } }), /同步到云端/);
+    await assert.rejects(createVideoGenerationTask(configFor("MiniMax-H3-Max"), "scene", { baseVideo }), /MiniMax-H3/);
+    await assert.rejects(createVideoGenerationTask(configFor("MiniMax-H3", "openai"), "scene", { baseVideo }), /MiniMax-H3/);
+    assert.equal(posts.length, count);
+});
+
+test("account proxy sends internal MiniMax task models and polls Context-IR upstream", async (context) => {
+    const user = useUserStore.getState();
+    context.mock.method(useUserStore, "getState", () => ({ ...user, token: "account-token" }));
+    const models: unknown[] = [];
+    context.mock.method(axios, "post", async (url: string, body: Record<string, unknown>) => {
+        assert.equal(url, "/api/v1/videos");
+        models.push(body.model);
+        return { data: { code: 0, data: { id: "job", task_id: "job", status: "queued" } } };
+    });
+    context.mock.method(axios, "get", async (url: string, options: { params?: Record<string, string> }) => {
+        assert.equal(url, "/api/v1/videos/job");
+        assert.deepEqual(options.params, { model: "MiniMax-H3" });
+        return { data: { task: { id: "job", status: "succeeded", content: { prompt: "enhanced" } } } };
+    });
+    const config = configFor("MiniMax-H3");
+    assert.equal(await optimizeMiniMaxPrompt(config, "scene"), "enhanced");
+    await createVideoGenerationTask(config, "scene", { baseVideo: { id: "base", name: "base.mp4", type: "video/mp4", url: "https://media.example/base.mp4" } });
+    assert.deepEqual(models, ["MiniMax-H3-Context-IR", "MiniMax-H3-Regenerate-2K"]);
+});
+
+test("MiniMax task queries follow the official ten-second interval", () => {
+    const now = Date.now();
+    const miniMax = configFor("MiniMax-H3");
+    assert.equal(isVideoPollDue(miniMax, "MiniMax-H3", undefined, now), true);
+    assert.equal(isVideoPollDue(miniMax, "MiniMax-H3", now - 5000, now), false);
+    assert.equal(isVideoPollDue(miniMax, "MiniMax-H3", now - 8000, now), true);
+    assert.equal(isVideoPollDue(configFor("generic-video", "openai"), "generic-video", now - 1000, now), true);
 });

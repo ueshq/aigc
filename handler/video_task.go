@@ -156,6 +156,12 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "视频接口没有返回任务 ID")
 		return
 	}
+	if service.IsMiniMaxContextIRModelName(modelName) {
+		// Context-IR returns text, so it is polled through the upstream query proxy instead of the video task table.
+		saveAIProxyLog(logContext, status, string(transformed), "")
+		OK(w, map[string]any{"id": parsed.UpstreamTaskID, "task_id": parsed.UpstreamTaskID, "object": "video", "model": modelName, "channelId": channel.ID, "userChannelId": userChannelID, "status": parsed.Status, "progress": parsed.Progress})
+		return
+	}
 	task, err := service.CreateVideoTask(service.VideoTaskCreateInput{
 		UserID:          user.ID,
 		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),

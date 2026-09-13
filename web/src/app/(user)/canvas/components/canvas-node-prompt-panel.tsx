@@ -3,13 +3,14 @@
 import { buildGenerationConfig, videoConfigPatch } from "./canvas-node-generation";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, BookOpen, LoaderCircle, Maximize2 } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { ArrowUp, BookOpen, LoaderCircle, Maximize2, WandSparkles } from "lucide-react";
+import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { isMiniMaxH3BaseModel, isMiniMaxH3Config } from "@/lib/minimax-video";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasCameraControl } from "./canvas-camera-control";
@@ -35,9 +36,10 @@ type CanvasNodePromptPanelProps = {
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
     onImageSettingsOpenChange?: (open: boolean) => void;
+    onOptimizePrompt?: (nodeId: string, prompt: string) => Promise<string>;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange, onOptimizePrompt }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -51,6 +53,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [prompt, setPrompt] = useState(sourcePrompt);
     const [expanded, setExpanded] = useState(false);
     const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
+    const [optimizingPrompt, setOptimizingPrompt] = useState(false);
+    const { message, modal } = App.useApp();
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
@@ -69,6 +73,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!canSubmit || isRunning) return;
         onGenerate(node.id, mode, text);
         if (!isPanorama) setPrompt("");
+    };
+
+    const canOptimizePrompt = mode === "video" && Boolean(onOptimizePrompt) && isMiniMaxH3BaseModel(config.model) && isMiniMaxH3Config(config, config.model);
+    const optimizePrompt = async () => {
+        if (!onOptimizePrompt || !prompt.trim() || optimizingPrompt) return;
+        setOptimizingPrompt(true);
+        try {
+            const optimized = await onOptimizePrompt(node.id, prompt);
+            modal.confirm({ title: "AI 优化提示词", icon: null, width: 720, okText: "替换提示词", cancelText: "保留原提示词", content: <div className="thin-scrollbar max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm">{optimized}</div>, onOk: () => updatePrompt(optimized) });
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "提示词优化失败");
+        } finally {
+            setOptimizingPrompt(false);
+        }
     };
 
     return (
@@ -99,6 +117,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <Tooltip title="提示词库">
                         <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<BookOpen className="size-3.5" />} onClick={() => setPromptLibraryOpen(true)} aria-label="提示词库" />
                     </Tooltip>
+                    {canOptimizePrompt ? (
+                        <Tooltip title="AI 优化提示词">
+                            <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={optimizingPrompt ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />} disabled={optimizingPrompt || !prompt.trim()} onClick={() => void optimizePrompt()} aria-label="AI 优化提示词" />
+                        </Tooltip>
+                    ) : null}
                     <PromptSelectDialog open={promptLibraryOpen} onOpenChange={setPromptLibraryOpen} onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>

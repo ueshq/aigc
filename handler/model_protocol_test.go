@@ -83,7 +83,7 @@ func protocolRecord(t *testing.T, value any) map[string]any {
 }
 
 func TestMiniMaxVideoResponses(t *testing.T) {
-	for _, modelName := range []string{"MiniMax-H3", "MiniMax-H3-Max"} {
+	for _, modelName := range []string{"MiniMax-H3", "MiniMax-H3-Max", "MiniMax-H3-Regenerate-2K"} {
 		channel := model.ModelChannel{Protocol: "minimax", BaseURL: "https://api.minimax.io"}
 		request := httptest.NewRequest(http.MethodGet, channel.BaseURL+"/v2/query/video_generation/job", nil)
 		for _, test := range []struct{ name, payload, status, videoURL, message string }{

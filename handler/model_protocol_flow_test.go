@@ -55,13 +55,15 @@ func TestModelProtocolChannelFlow(t *testing.T) {
 	// Representative channel contracts; model variants and precedence have separate fixtures.
 	tests := []struct {
 		name, protocol, modelName, endpoint, body, path, wantBody, payload, pollPath, pollPayload, wantResponse, message string
-		local                                                                                                            bool
+		local, transient                                                                                                 bool
 	}{
 		{name: "Gemini nonstream", protocol: "gemini", modelName: "gemini-text", endpoint: "/chat/completions", body: `{"model":"gemini-text","stream":false,"contents":[]}`, path: "/v1beta/models/gemini-text:generateContent", wantBody: `{"contents":[]}`, payload: `{"candidates":[]}`},
 		{name: "Gemini stream", protocol: "gemini", modelName: "gemini-text", endpoint: "/chat/completions", body: `{"model":"gemini-text","stream":true,"contents":[]}`, path: "/v1beta/models/gemini-text:streamGenerateContent?alt=sse", wantBody: `{"contents":[]}`, payload: `{"candidates":[]}`},
 		{name: "MiMo audio", protocol: "mimo", modelName: "mimo-v2.5-tts", endpoint: "/audio/speech", body: `{"model":"mimo-v2.5-tts","input":" hello "}`, path: "/v1/chat/completions", wantBody: `{"model":"mimo-v2.5-tts","messages":[{"role":"assistant","content":"hello"}],"audio":{"format":"wav","voice":"冰糖"}}`, payload: `{"choices":[{"message":{"audio":{"data":"AQID"}}}]}`, wantResponse: "\x01\x02\x03"},
 		{name: "MiniMax video create", protocol: "minimax", modelName: "MiniMax-H3", endpoint: "/videos", body: `{"model":"MiniMax-H3","content":[{"type":"text","text":"scene"}],"resolution":"768P","duration":5,"ratio":"16:9"}`, path: "/v2/video_generation", payload: `{"task_id":"upstream-job","status":"processing"}`, pollPath: "/v2/query/video_generation/upstream-job", pollPayload: `{"task":{"id":"upstream-job","status":"succeeded","content":{"url":"https://media.invalid/video"}}}`},
 		{name: "MiniMax Max personal channel", protocol: "minimax", local: true, modelName: "MiniMax-H3-Max", endpoint: "/videos", body: `{"model":"MiniMax-H3-Max","content":[{"type":"text","text":"scene"}],"resolution":"768P","duration":5,"ratio":"16:9"}`, path: "/v2/video_generation", payload: `{"task_id":"upstream-job","status":"processing"}`, pollPath: "/v2/query/video_generation/upstream-job", pollPayload: `{"task":{"id":"upstream-job","status":"succeeded","content":{"url":"https://media.invalid/video"}}}`},
+		{name: "MiniMax 2K regeneration", protocol: "minimax", modelName: "MiniMax-H3-Regenerate-2K", endpoint: "/videos", body: `{"model":"MiniMax-H3-Regenerate-2K","resolution":"2K","aigc_watermark":true,"content":[{"type":"text","text":"scene"},{"type":"video_url","video_url":{"url":"https://media.invalid/base.mp4"},"role":"base_video"}]}`, path: "/v2/video_regeneration", wantBody: `{"model":"MiniMax-H3","resolution":"2K","aigc_watermark":true,"content":[{"type":"text","text":"scene"},{"type":"video_url","video_url":{"url":"https://media.invalid/base.mp4"},"role":"base_video"}]}`, payload: `{"task_id":"upstream-job","status":"processing"}`, pollPath: "/v2/query/video_generation/upstream-job", pollPayload: `{"task":{"id":"upstream-job","status":"succeeded","task_type":"regeneration","resolution":"2K","content":{"url":"https://media.invalid/video"}}}`},
+		{name: "MiniMax Context-IR personal channel", protocol: "minimax", local: true, transient: true, modelName: "MiniMax-H3-Context-IR", endpoint: "/videos", body: `{"model":"MiniMax-H3-Context-IR","content":[{"type":"text","text":"scene"}],"duration":5,"ratio":"16:9"}`, path: "/v2/h3_context_ir", wantBody: `{"model":"MiniMax-H3","content":[{"type":"text","text":"scene"}],"duration":5,"ratio":"16:9"}`, payload: `{"task_id":"context-job"}`, pollPath: "/v2/query/video_generation/context-job", pollPayload: `{"task":{"id":"context-job","status":"succeeded","task_type":"h3_context_ir","modality":"text","content":{"prompt":"enhanced scene"}}}`},
 		{name: "CogVideoX3 create", modelName: "cogvideox-3", endpoint: "/videos", body: `{"model":"cogvideox-3","prompt":"scene"}`, path: "/v1/videos/generations", payload: `{"id":"upstream-job","status":"processing"}`},
 		{name: "Ark Seedance create", protocol: "ark", modelName: "doubao-seedance-2", endpoint: "/videos", body: `{"model":"doubao-seedance-2","content":[{"type":"text","text":"scene"}]}`, path: "/v1/contents/generations/tasks", payload: `{"id":"upstream-job","status":"processing"}`},
 		{name: "Gemini video error response", protocol: "gemini", modelName: "veo", endpoint: "/videos", body: `{"model":"veo","contents":[]}`, path: "/v1beta/models/veo:predictLongRunning", wantBody: `{"contents":[]}`, payload: `{"name":"operations/job"}`, message: `{"message":""}`},
@@ -73,7 +75,7 @@ func TestModelProtocolChannelFlow(t *testing.T) {
 			test.modelName = firstNonEmpty(test.modelName, "future-model")
 			test.body = firstNonEmpty(test.body, `{"model":"future-model"}`)
 			test.wantBody = firstNonEmpty(test.wantBody, test.body)
-			channel := model.ModelChannel{ID: "channel", Name: "fixture", Protocol: test.protocol, BaseURL: "https://upstream.invalid", APIKey: "remote-key", Models: []string{test.modelName}, Enabled: true, Weight: 1}
+			channel := model.ModelChannel{ID: "channel", Name: "fixture", Protocol: test.protocol, BaseURL: "https://upstream.invalid", APIKey: "remote-key", Models: []string{service.MiniMaxChannelModelName(test.modelName)}, Enabled: true, Weight: 1}
 			if _, err := repository.SaveSettings(model.Settings{Private: model.PrivateSetting{Channels: []model.ModelChannel{channel}}}, "fixture"); err != nil {
 				t.Fatal(err)
 			}
@@ -146,6 +148,22 @@ func TestModelProtocolChannelFlow(t *testing.T) {
 				if json.Unmarshal(writer.Body.Bytes(), &result) != nil || result.Code != 1 || result.Msg != test.message {
 					t.Fatalf("error response: %s", writer.Body)
 				}
+			case test.transient:
+				envelope := protocolRecord(t, protocolJSON(t, writer.Body.String()))
+				data := protocolRecord(t, envelope["data"])
+				if envelope["code"] != float64(0) || data["id"] != "context-job" || data["model"] != test.modelName || data["userChannelId"] != localID {
+					t.Fatalf("transient task response: %s", writer.Body)
+				}
+				if _, found, _ := repository.GetVideoTask(taskID); found {
+					t.Fatal("Context-IR must not create a video task")
+				}
+				poll := httptest.NewRequest(http.MethodGet, "/videos/context-job?model=MiniMax-H3", nil)
+				poll.Header.Set("X-Model-Channel-ID", channel.ID)
+				poll.Header.Set(userModelChannelHeader, localID)
+				poll = poll.WithContext(service.WithUser(poll.Context(), model.PublicUser(user)))
+				pollWriter := httptest.NewRecorder()
+				AIVideo(pollWriter, poll, "context-job")
+				assertProtocolJSONValue(t, protocolJSON(t, pollWriter.Body.String()), test.pollPayload)
 			case test.endpoint == "/videos":
 				envelope := protocolRecord(t, protocolJSON(t, writer.Body.String()))
 				data := protocolRecord(t, envelope["data"])
