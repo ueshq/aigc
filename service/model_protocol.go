@@ -16,6 +16,8 @@ func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 		return BuildGeminiChannelURL(channel, path)
 	case ModelChannelProtocolMiniMax:
 		return normalizeModelChannelBaseURL(channel.BaseURL) + path
+	case ModelChannelProtocolRunningHub:
+		return runningHubBaseURL(channel) + path
 	default:
 		return buildOpenAIModelChannelURL(channel, path)
 	}
@@ -35,6 +37,8 @@ func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 		return fetchGeminiAdminChannelModels(channel)
 	case IsMiniMaxChannel(channel):
 		return MiniMaxModels(), nil
+	case IsRunningHubChannel(channel):
+		return RunningHubModels(), nil
 	case IsMiMoChannel(channel):
 		result := MiMoModels()
 		sort.Strings(result)

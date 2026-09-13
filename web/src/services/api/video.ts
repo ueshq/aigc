@@ -5,6 +5,7 @@ import axios from "axios";
 
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isMiniMaxH3BaseModel, isMiniMaxH3Config, miniMaxVideoInputError, miniMaxMediaLimits, miniMaxMediaFormats, MINIMAX_CONTEXT_IR_MODEL, MINIMAX_REGENERATION_MODEL, MINIMAX_REQUEST_MAX_BYTES } from "@/lib/minimax-video";
+import { isRunningHubConfig, runningHubVideoInputError } from "@/lib/runninghub";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, videoDurationRule, videoReferenceMode, normalizeVideoSizeValue, normalizeVideoResolutionValue, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
@@ -197,6 +198,8 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
     if (input.baseVideo && !(isMiniMaxH3Config(config, model) && isMiniMaxH3BaseModel(model))) throw new VideoRequestError("仅 MiniMax 官方渠道的 MiniMax-H3 支持 2K 重生成");
+    const runningHubError = isRunningHubConfig(config, model) ? runningHubVideoInputError(model, input) : "";
+    if (runningHubError) throw new VideoRequestError(runningHubError);
     if (isArkVideoConfig(config, model)) return createArkSeedanceVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSizeValue(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
@@ -232,7 +235,8 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     if (!isGeminiOmniFlashVideoModel(model)) {
         body.append("seconds", config.videoSeconds);
     }
-    if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
+    if (isRunningHubConfig(config, model)) body.append("size", config.size);
+    else if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
     else if (size !== "auto") body.append("size", size);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");

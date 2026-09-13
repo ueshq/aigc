@@ -87,10 +87,14 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		mode: aiProtocolVideoRequest, body: body, contentType: contentType, modelName: modelName,
 		channel: channel, endpoint: "/videos", path: upstreamPath,
 	})
-	body, contentType = prepared.body, prepared.contentType
+	body, contentType, upstreamPath = prepared.body, prepared.contentType, prepared.path
 	if err != nil {
 		log.Printf("AI video normalize request failed: model=%s err=%v", modelName, err)
-		Fail(w, "AI 接口请求失败")
+		message := "AI 接口请求失败"
+		if prepared.failureLabel == "RunningHub" {
+			message = err.Error()
+		}
+		Fail(w, message)
 		return
 	}
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
@@ -299,6 +303,9 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	endpoint := "/videos/" + pollID
 	upstreamPath := resolveAIProxyPath(channel, task.Model, endpoint)
 	request, err := http.NewRequest(http.MethodGet, resolveAIProxyURL(channel, task.Model, upstreamPath), nil)
+	if service.IsRunningHubChannel(channel) {
+		request, err = service.NewRunningHubQueryRequest(channel, pollID)
+	}
 	if err != nil {
 		return service.VideoTaskPollUpdate{}, err
 	}
@@ -307,7 +314,7 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	logContext := aiLogContext{
 		StartedAt:       startedAt,
 		Endpoint:        endpoint,
-		Method:          http.MethodGet,
+		Method:          request.Method,
 		Model:           task.Model,
 		Channel:         channel,
 		UserID:          task.UserID,
@@ -368,6 +375,11 @@ func doAIRequest(request *http.Request, channel model.ModelChannel) ([]byte, int
 }
 
 func transformVideoTaskPayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
+	if service.IsRunningHubChannel(channel) {
+		if result, ok := transformRunningHubVideoTaskResponse(payload); ok {
+			return result
+		}
+	}
 	if service.IsGeminiChannel(channel) {
 		if result, ok := transformGeminiVideoTaskResponse(payload); ok {
 			return result

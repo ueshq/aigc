@@ -80,6 +80,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if IsMiniMaxChannel(resolved) {
 		return "MiniMax H3 系列是异步视频模型，请在视频创作台测试生成。", nil
 	}
+	if IsRunningHubChannel(resolved) {
+		return "RunningHub 模型均为异步任务，后台测试不会发起生成；请在图片、视频或音频创作台测试。", nil
+	}
 	if IsArkChannel(resolved) {
 		return testArkSeedanceChannelModel(resolved, modelName)
 	}
@@ -313,12 +316,16 @@ func SelectModelChannelForModel(modelName string, channelID string) (model.Model
 	return channels[0], nil
 }
 
-func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
-	timeout := channel.Timeout
-	if timeout <= 0 {
-		timeout = 600
+// ChannelTimeout is the per-request timeout of a channel, also used as the RunningHub task wait limit.
+func ChannelTimeout(channel model.ModelChannel) time.Duration {
+	if channel.Timeout <= 0 {
+		return 600 * time.Second
 	}
-	return &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	return time.Duration(channel.Timeout) * time.Second
+}
+
+func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
+	return &http.Client{Timeout: ChannelTimeout(channel)}
 }
 
 func buildOpenAIModelChannelURL(channel model.ModelChannel, path string) string {
@@ -428,7 +435,7 @@ func isImageModelName(modelName string) bool {
 }
 
 func isTextModelName(modelName string) bool {
-	return !isImageModelName(modelName) && !isVideoModelName(modelName)
+	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(modelName)), "/tts")
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {

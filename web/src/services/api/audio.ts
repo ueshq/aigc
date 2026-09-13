@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 
 import { audioMimeType, isGlmTtsModel, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
+import { isRunningHubConfig, normalizeRunningHubVoice } from "@/lib/runninghub";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
 import { autoSyncToCloud } from "@/services/image-storage";
 import { localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
@@ -142,6 +143,9 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
     if (isGeminiTtsModel(model) && isGeminiConfig(config, model)) {
         if (referenceAudio) throw new Error("Gemini TTS 不支持参考音频");
         return { model, ...buildGeminiTtsRequest(config, prompt) };
+    }
+    if (isRunningHubConfig(config, model)) {
+        return { model, input: prompt, voice: normalizeRunningHubVoice(model, config.audioVoice), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)) };
     }
     if (isGlmTtsModel(model)) {
         if (prompt.length > 1024) throw new Error("GLM-TTS 文本不能超过 1024 个字符");

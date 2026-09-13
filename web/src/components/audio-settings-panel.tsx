@@ -8,6 +8,7 @@ import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, glmTtsFormatOptions, glmTtsVoiceOptions, isGlmTtsModel, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsFormatOptions, mimoTtsVoiceOptions, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { normalizeRunningHubVoice, runningHubModelInfo } from "@/lib/runninghub";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const speedOptions = ["0.75", "1", "1.25", "1.5"];
@@ -30,7 +31,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">音频设置</div> : null}
-                {gemini ? <GeminiAudioSettings config={config} onConfigChange={onConfigChange} theme={theme} /> : isMimoTtsModel(model) ? <MiMoAudioSettings config={config} model={model} onConfigChange={onConfigChange} theme={theme} /> : <AudioSpeechSettings config={config} glm={isGlmTtsModel(model)} onConfigChange={onConfigChange} theme={theme} />}
+                {gemini ? <GeminiAudioSettings config={config} onConfigChange={onConfigChange} theme={theme} /> : isMimoTtsModel(model) ? <MiMoAudioSettings config={config} model={model} onConfigChange={onConfigChange} theme={theme} /> : runningHubModelInfo(model) ? <RunningHubAudioSettings config={config} model={model} onConfigChange={onConfigChange} theme={theme} /> : <AudioSpeechSettings config={config} glm={isGlmTtsModel(model)} onConfigChange={onConfigChange} theme={theme} />}
             </div>
         </ImageSettingsTheme>
     );
@@ -156,6 +157,47 @@ function AudioSpeechSettings({ config, glm, onConfigChange, theme }: { config: A
                         className="thin-scrollbar h-20 w-full resize-none rounded-xl border bg-transparent px-3 py-2 text-sm leading-5 outline-none"
                         style={{ borderColor: theme.node.stroke, color: theme.node.text }}
                         onChange={(event) => onConfigChange("audioInstructions", event.target.value)}
+                        onMouseDown={(event) => event.stopPropagation()}
+                    />
+                </SettingGroup>
+            ) : null}
+        </>
+    );
+}
+
+function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { config: AiConfig; model: string; onConfigChange: AudioSettingsPanelProps["onConfigChange"]; theme: CanvasTheme }) {
+    const info = runningHubModelInfo(model);
+    const voice = normalizeRunningHubVoice(model, config.audioVoice);
+    const speed = info?.speed;
+
+    return (
+        <>
+            <SettingGroup title="声音" color={theme.node.muted}>
+                {info?.voices ? (
+                    <Select className="w-full" showSearch optionFilterProp="label" value={voice} options={info.voices} onChange={(value) => onConfigChange("audioVoice", value)} />
+                ) : (
+                    <input
+                        value={voice}
+                        placeholder="填写 RunningHub 音色 ID"
+                        className="h-9 w-full rounded-full border bg-transparent px-3 text-sm outline-none"
+                        style={{ borderColor: theme.node.stroke, color: theme.node.text }}
+                        onChange={(event) => onConfigChange("audioVoice", event.target.value)}
+                        onMouseDown={(event) => event.stopPropagation()}
+                    />
+                )}
+            </SettingGroup>
+            {speed ? (
+                <SettingGroup title="语速" color={theme.node.muted}>
+                    <input
+                        type="number"
+                        min={speed.min}
+                        max={speed.max}
+                        step={0.05}
+                        className="h-9 w-full rounded-full border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }}
+                        value={config.audioSpeed || "1"}
+                        onChange={(event) => onConfigChange("audioSpeed", event.target.value)}
+                        onBlur={(event) => onConfigChange("audioSpeed", String(Math.min(speed.max, Math.max(speed.min, Number(event.target.value) || 1))))}
                         onMouseDown={(event) => event.stopPropagation()}
                     />
                 </SettingGroup>

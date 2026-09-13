@@ -3,6 +3,7 @@
 ## Unreleased
 
 + [新增] MiniMax-H3 支持 AI 优化提示词（H3-Context-IR）与 768P 成片 2K 重生成；MiniMax 渠道支持国内站地址切换与 AIGC 水印，任务查询间隔调整为官方建议的 10 秒
++ [新增] 接入 RunningHub 渠道，按模型家族提供图片、视频（文生、首尾帧、参考生成）与 TTS 模型，由后端按输入选择端点、映射参数并上传素材；OpenAI 协议新增 RunningHub LLM 地址预设
 
 ## v0.7.1 - 2026-09-13
 

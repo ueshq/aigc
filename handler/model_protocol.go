@@ -27,6 +27,14 @@ type aiProtocolRequest struct {
 }
 
 func prepareAIProtocolRequest(input aiProtocolRequest) (aiProtocolRequest, error) {
+	if service.IsRunningHubChannel(input.channel) && isRunningHubTaskEndpoint(input.endpoint) {
+		input.failureLabel = "RunningHub"
+		body, path, err := prepareRunningHubRequest(input)
+		if err == nil {
+			input.body, input.contentType, input.path = body, "application/json", path
+		}
+		return input, err
+	}
 	if service.IsGeminiChannel(input.channel) {
 		input.failureLabel = "Gemini"
 		if input.mode == aiProtocolProxyRequest && input.endpoint == "/chat/completions" && !geminiStreamRequested(input.body) {

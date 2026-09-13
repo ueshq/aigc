@@ -7,6 +7,7 @@ export function usesAccountProxy(config: AiConfig) {
 
 export function aiApiUrl(config: AiConfig, path: string) {
     if (usesAccountProxy(config)) return `/api/v1${path}`;
+    if (channelProtocolForConfig(config) === "runninghub") throw new Error("RunningHub 渠道需要登录后通过后端代理使用");
     return buildApiUrl(localChannelForActiveModel(config)?.baseUrl || config.baseUrl, path);
 }
 

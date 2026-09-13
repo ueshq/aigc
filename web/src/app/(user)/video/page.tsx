@@ -18,6 +18,7 @@ import { isFailedTask, usesAccountProxy } from "@/services/api/ai-request";
 import { VideoSettingsPanel, videoResolutionLabel, videoResolutionOptions, videoSizeForResolution, videoSizeOptions } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { isRunningHubConfig, runningHubVideoInputError } from "@/lib/runninghub";
 import { isMiniMaxH3BaseModel, isMiniMaxH3Config, MINIMAX_REGENERATION_MODEL, miniMaxVideoCapabilities, miniMaxVideoInputError, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
 import { ARK_SEEDANCE_REFERENCE_LIMITS, boolConfig, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { modelKey, normalizeVideoConfig, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, videoReferenceMode, isAgnesVideoV25Model, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
@@ -479,7 +480,7 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        if (!isMiniMaxH3Config(configValue, modelValue) && !isAgnesVideoV25Model(modelValue)) {
+        if (!isMiniMaxH3Config(configValue, modelValue) && !isAgnesVideoV25Model(modelValue) && !isRunningHubConfig(configValue, modelValue)) {
             const videoReferenceError = seedanceVideoReferenceError(videoReferenceItems, seedanceReferenceLimits(configValue, modelValue));
             if (videoReferenceError) {
                 message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
@@ -488,7 +489,7 @@ export default function VideoPage() {
         }
         const normalizedConfig = buildVideoConfig(configValue, modelValue, videoReferenceMode({ firstFrame: firstFrameItem, lastFrame: lastFrameItem, references: referenceItems, videoReferences: videoReferenceItems, audioReferences: audioReferenceItems }));
         const input = { references: [...referenceItems], firstFrame: firstFrameItem, lastFrame: lastFrameItem, videoReferences: [...videoReferenceItems], audioReferences: [...audioReferenceItems] };
-        const inputError = isMiniMaxH3Config(normalizedConfig, modelValue) ? miniMaxVideoInputError(modelValue, text, input) : "";
+        const inputError = isMiniMaxH3Config(normalizedConfig, modelValue) ? miniMaxVideoInputError(modelValue, text, input) : isRunningHubConfig(normalizedConfig, modelValue) ? runningHubVideoInputError(modelValue, input) : "";
         if (inputError) { message.error(inputError); return null; }
         return { text, model: modelValue, config: normalizedConfig, ...input, taskCount: normalizeVideoCount(taskCountValue) };
     };
@@ -1157,8 +1158,9 @@ function WorkbenchPanel({
     setBottomSettingsCollapsed?: (value: boolean) => void;
 }) {
     const frameReferencesEnabled = supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
-    const durationRule = videoDurationRule(config, videoReferenceMode({ firstFrame, lastFrame, references, videoReferences, audioReferences }));
-    const parameterOptions = videoParameterOptions(config);
+    const inputMode = videoReferenceMode({ firstFrame, lastFrame, references, videoReferences, audioReferences });
+    const durationRule = videoDurationRule(config, inputMode);
+    const parameterOptions = videoParameterOptions(config, inputMode);
     const referenceLimits = seedanceReferenceLimits(config, model);
     const audioGenerationEnabled = !isMiniMaxH3Config(config, model) && supportsVideoAudioGeneration(model, channelProtocolForConfig({ ...config, model, videoModel: model }));
     const generateAudio = boolConfig(config.videoGenerateAudio, false);
@@ -1204,7 +1206,7 @@ function WorkbenchPanel({
                                 <QuickSelect label="比例" value={normalizeMiniMaxH3Ratio(config.size, firstFrame || lastFrame ? "frames" : references.length || videoReferences.length || audioReferences.length ? "reference" : "text")} options={firstFrame || lastFrame ? [{ value: "adaptive", label: "跟随首帧" }] : miniMaxRatioOptions.filter((item) => references.length || videoReferences.length || audioReferences.length || item.value !== "adaptive")} onChange={(value) => updateConfig("size", value)} />
                                 <QuickNumber label="秒数" value={String(normalizeMiniMaxH3Duration(config.videoSeconds, model))} min={miniMax.minSeconds} max={15} onChange={(value) => updateConfig("videoSeconds", value)} />
                             </> : <>
-                                <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={parameterOptions.resolutions?.map((value) => ({ value: normalizeVideoResolutionValue(value), label: videoResolutionLabel(value) })) || videoResolutionOptions} onChange={(value) => { updateConfig("vquality", value); if (!parameterOptions.ratios) updateConfig("size", videoSizeForResolution(value, config.size)); }} />
+                                {parameterOptions.resolutions?.length === 0 ? null : <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={parameterOptions.resolutions?.map((value) => ({ value: normalizeVideoResolutionValue(value), label: videoResolutionLabel(value) })) || videoResolutionOptions} onChange={(value) => { updateConfig("vquality", value); if (!parameterOptions.ratios) updateConfig("size", videoSizeForResolution(value, config.size)); }} />}
                                 <QuickSelect label={parameterOptions.ratios ? "比例" : "尺寸"} value={parameterOptions.ratios ? config.size : videoSizeForResolution(config.vquality, config.size)} options={parameterOptions.ratios?.map((value) => ({ value, label: value === "adaptive" ? "自适应" : value })) || videoSizeOptions(config.vquality)} onChange={(value) => updateConfig("size", value)} />
                                 {durationRule.values ? <QuickSelect label="秒数" value={config.videoSeconds} options={durationRule.values.map((value) => ({ value: String(value), label: `${value}s` }))} onChange={(value) => updateConfig("videoSeconds", value)} /> : <QuickNumber label="秒数" value={config.videoSeconds} min={durationRule.auto ?? durationRule.min} max={durationRule.max} onChange={(value) => updateConfig("videoSeconds", value)} />}
                             </>}

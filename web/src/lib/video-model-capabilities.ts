@@ -1,5 +1,6 @@
 import { isGeminiConfig, isGeminiVideoModel, isGeminiVeo31Model, normalizeGeminiVideoRatio, normalizeGeminiVideoResolution } from "@/lib/gemini";
 import { isMiniMaxH3Config, miniMaxVideoCapabilities, normalizeMiniMaxVideoConfig, type MiniMaxReferenceMode } from "@/lib/minimax-video";
+import { isRunningHubConfig, runningHubModelInfo, runningHubVideoCapabilities } from "@/lib/runninghub";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceRatioOptions, seedanceResolutionOptions, isSeedanceFastOrMiniModel } from "@/lib/seedance-video";
 import { type AiConfig } from "@/stores/use-config-store";
 
@@ -21,6 +22,8 @@ export function isSeedance20Model(modelName: string) {
 }
 
 export function supportsVideoFrameReferences(modelName: string, protocol = "") {
+    const runningHubModes = runningHubModelInfo(modelName)?.modes;
+    if (runningHubModes) return Boolean(runningHubModes.frames);
     const model = modelKey(modelName);
     return (
         isAgnesVideoV25Model(model) ||
@@ -54,6 +57,8 @@ export function supportsVideoFrameReferences(modelName: string, protocol = "") {
 }
 
 export function supportsVideoAudioGeneration(modelName: string, protocol = "") {
+    const runningHubModes = runningHubModelInfo(modelName)?.modes;
+    if (runningHubModes) return Object.values(runningHubModes).some((caps) => caps?.audio);
     const model = modelKey(modelName);
     if (protocol === "minimax" && (model === "minimax-h3" || model === "minimax-h3-max")) return true;
     if (model.includes("motion-control")) return false;
@@ -111,6 +116,13 @@ export function videoDurationRule(config: AiConfig, mode?: VideoReferenceMode): 
     const model = config.model || config.videoModel;
     const key = modelKey(model);
     if (isMiniMaxH3Config(config, model)) return { min: miniMaxVideoCapabilities(model)!.minSeconds, max: 15, defaultSeconds: 5 };
+    if (isRunningHubConfig(config, model)) {
+        const { durations, duration, auto } = runningHubVideoCapabilities(model, mode);
+        const range = Array.isArray(durations) ? { min: durations[0], max: durations[durations.length - 1] } : durations;
+        // Long contiguous second lists use a number input instead of one option per second.
+        const values = Array.isArray(durations) && (durations.length <= 6 || durations.some((value, index) => index > 0 && value !== durations[index - 1] + 1)) ? durations : undefined;
+        if (range) return { ...range, defaultSeconds: duration || range.min, ...(values ? { values } : {}), ...(auto ? { auto } : {}) };
+    }
     let values: number[] | undefined;
     if (isGeminiConfig(config, model) && isGeminiVideoModel(model)) values = normalizeGeminiVideoResolution(config.vquality) !== "720p" || mode === "frames" || mode === "reference" ? [8] : [4, 6, 8];
     else if (isCogVideoX3Model(model)) return { min: 5, max: 10, defaultSeconds: 5, values: [5, 10] };
@@ -148,7 +160,13 @@ export function normalizeVideoConfig(config: AiConfig, mode?: VideoReferenceMode
     if (isMiniMaxH3Config(scoped, model)) return normalizeMiniMaxVideoConfig(scoped, mode);
     let size = normalizeVideoSizeValue(config.size);
     let vquality = normalizeVideoResolutionValue(config.vquality);
-    if (isGeminiConfig(scoped, model) && isGeminiVideoModel(model)) {
+    if (isRunningHubConfig(scoped, model)) {
+        const caps = runningHubVideoCapabilities(model, mode);
+        const resolutions = (caps.resolutions || []).map(normalizeVideoResolutionValue);
+        const ratios = caps.ratios || ["adaptive"];
+        if (resolutions.length && !resolutions.includes(vquality)) vquality = normalizeVideoResolutionValue(caps.resolution || resolutions[0]);
+        size = ratios.includes(config.size) ? config.size : caps.ratio || ratios[0];
+    } else if (isGeminiConfig(scoped, model) && isGeminiVideoModel(model)) {
         size = normalizeGeminiVideoRatio(config.size) || "adaptive";
         vquality = normalizeGeminiVideoResolution(config.vquality);
     } else if (isCogVideoX3Model(model)) {
@@ -177,8 +195,12 @@ function normalizeCogVideoX3Size(resolutionValue: string, sizeValue: string) {
 }
 
 
-export function videoParameterOptions(config: AiConfig): { resolutions?: string[]; ratios?: string[] } {
+export function videoParameterOptions(config: AiConfig, mode?: VideoReferenceMode): { resolutions?: string[]; ratios?: string[] } {
     const model = config.model || config.videoModel;
+    if (isRunningHubConfig(config, model)) {
+        const caps = runningHubVideoCapabilities(model, mode);
+        return { resolutions: caps.resolutions || [], ratios: caps.ratios || ["adaptive"] };
+    }
     if (isMiniMaxH3Config(config, model)) return { resolutions: [...miniMaxVideoCapabilities(model)!.resolutions], ratios: seedanceRatioOptions.map((item) => item.value) };
     if (isGeminiConfig(config, model) && isGeminiVideoModel(model)) return { resolutions: ["720p", "1080p", "4k"], ratios: ["16:9", "9:16", "adaptive"] };
     if (isAgnesVideoV25Model(model)) return { resolutions: ["720P"], ratios: seedanceRatioOptions.filter((item) => item.value !== "adaptive").map((item) => item.value) };

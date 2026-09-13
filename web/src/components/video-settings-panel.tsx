@@ -8,6 +8,7 @@ import { boolConfig, isSeedanceFastOrMiniModel, isSeedanceVideoConfig, normalize
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { isSeedance20Model, normalizeVideoConfig, normalizeVideoSizeValue, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { isMiniMaxH3Config, miniMaxVideoCapabilities, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
+import { isRunningHubConfig } from "@/lib/runninghub";
 import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-store";
 
 export const videoResolutionOptions = [
@@ -45,13 +46,13 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     const activeModel = modelName || config.model || config.videoModel;
     config = normalizeVideoConfig({ ...config, model: activeModel, videoModel: activeModel }, referenceMode);
     if (isMiniMaxH3Config(config, activeModel)) return <MiniMaxVideoSettingsPanel config={config} modelName={activeModel} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} visualOnly={visualOnly} referenceMode={referenceMode} />;
-    if (isSeedanceVideoConfig(config)) {
+    if (isSeedanceVideoConfig(config) && !isRunningHubConfig(config, activeModel)) {
         return <SeedanceVideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} visualOnly={visualOnly} />;
     }
 
     const model = modelName || config.model || config.videoModel;
     const durationRule = videoDurationRule(config, referenceMode);
-    const parameterOptions = videoParameterOptions(config);
+    const parameterOptions = videoParameterOptions(config, referenceMode);
     const seconds = config.videoSeconds;
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
@@ -83,7 +84,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
-                <SettingGroup title="清晰度" color={theme.node.muted}>
+                {parameterOptions.resolutions?.length === 0 ? null : <SettingGroup title="清晰度" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
                         {(parameterOptions.resolutions?.map((value) => ({ value: normalizeVideoResolutionValue(value), label: videoResolutionLabel(value) })) || resolutionButtonOptions).map((item) => (
                             <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => updateResolution(item.value)}>
@@ -92,7 +93,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                         ))}
                         {parameterOptions.resolutions ? null : <ResolutionInput value={resolution} theme={theme} onChange={updateResolution} />}
                     </div>
-                </SettingGroup>
+                </SettingGroup>}
                 {parameterOptions.ratios ? <SettingGroup title="比例" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">{parameterOptions.ratios.map((value) => <OptionPill key={value} selected={config.size === value} theme={theme} onClick={() => onConfigChange("size", value)}>{value === "adaptive" ? "自适应" : value}</OptionPill>)}</div>
                 </SettingGroup> : <SettingGroup title="尺寸" color={theme.node.muted}>

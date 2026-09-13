@@ -320,11 +320,11 @@ func NormalizeVideoTaskStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "completed", "complete", "done", "succeeded", "success":
 		return "completed"
-	case "failed", "fail", "error", "cancelled", "canceled":
+	case "failed", "fail", "error", "cancel", "cancelled", "canceled":
 		return "failed"
 	case "running", "processing", "in_progress", "in-progress":
 		return "processing"
-	case "queued", "queue", "pending", "":
+	case "queued", "queue", "pending", "create", "":
 		return "queued"
 	default:
 		return strings.ToLower(strings.TrimSpace(status))

@@ -38,7 +38,7 @@ func TestModelProtocolProxyPathContract(t *testing.T) {
 			}
 		})
 	}
-	for _, protocol := range []string{"", "openai", "minimax", "mimo", "future-protocol"} {
+	for _, protocol := range []string{"", "openai", "minimax", "mimo", "runninghub", "future-protocol"} {
 		for _, path := range []string{"/chat/completions", "/responses", "/images/generations", "/images/edits", "/audio/speech", "/videos", "/videos/task", "/models"} {
 			if got := resolveAIProxyPath(model.ModelChannel{Protocol: protocol}, "future-model", path); got != path {
 				t.Errorf("passthrough %q %q: got %q", protocol, path, got)
@@ -55,6 +55,8 @@ func TestModelProtocolProxyURLContract(t *testing.T) {
 		{"existing v1", "openai", "https://api.example/v1/", "model", "/videos", "https://api.example/v1/videos"},
 		{"gemini base version", "gemini", "https://api.example/v1beta/", "model", "/v1beta/models/model:generateContent", "https://api.example/v1beta/models/model:generateContent"},
 		{"minimax no v1", "minimax", "https://api.example/", "MiniMax-H3", "/v2/video_generation", "https://api.example/v2/video_generation"},
+		{"runninghub adds openapi version", "runninghub", "https://www.runninghub.ai/", "kling-v3.0-pro/video", "/query", "https://www.runninghub.ai/openapi/v2/query"},
+		{"runninghub keeps openapi version", "runninghub", "https://www.runninghub.cn/openapi/v2/", "seedream-v4.5/image", "/seedream-v4.5/text-to-image", "https://www.runninghub.cn/openapi/v2/seedream-v4.5/text-to-image"},
 		{"agnes query", "openai", "https://api.example/v1/", "agnes-video-2.5", "/videos/video_a b", "https://api.example/agnesapi?model_name=agnes-video-2.5&video_id=video_a+b"},
 		{"agnes wins protocol URL builder", "gemini", "https://api.example/v1", "agnes-video-2.5", "/videos/video_task", "https://api.example/agnesapi?model_name=agnes-video-2.5&video_id=video_task"},
 	}
@@ -99,6 +101,21 @@ func TestModelProtocolProxyPreparationOrder(t *testing.T) {
 			name: "MiniMax Context-IR keeps text ratio rule", protocol: "minimax", model: "MiniMax-H3-Context-IR", endpoint: "/videos", mode: aiProtocolVideoRequest,
 			body:     `{"model":"MiniMax-H3-Context-IR","content":[{"type":"text","text":"scene"}],"duration":5,"ratio":"adaptive"}`,
 			wantPath: "/v2/h3_context_ir", wantLabel: "MiniMax", wantError: "MiniMax 文生视频需要指定画面比例",
+		},
+		{
+			name: "RunningHub image maps the family endpoint", protocol: "runninghub", model: "seedream-v4.5/image", endpoint: "/images/generations",
+			body:     `{"model":"seedream-v4.5/image","prompt":"cat","size":"1536x1024","n":1,"response_format":"b64_json"}`,
+			wantPath: "/seedream-v4.5/text-to-image", wantLabel: "RunningHub", wantBody: `{"prompt":"cat","width":1536,"height":1024}`,
+		},
+		{
+			name: "RunningHub speech maps voice and speed", protocol: "runninghub", model: "minimax/speech-2.6-hd/tts", endpoint: "/audio/speech",
+			body:     `{"model":"minimax/speech-2.6-hd/tts","input":"你好","voice":"Calm_Woman","speed":1,"response_format":"mp3"}`,
+			wantPath: "/rhart-audio/text-to-audio/speech-2.6-hd", wantLabel: "RunningHub",
+			wantBody: `{"text":"你好","voice_id":"Calm_Woman","speed":1,"enable_base64_output":false,"english_normalization":false}`,
+		},
+		{
+			name: "RunningHub rejects an unsupported mode", protocol: "runninghub", model: "higgsfield/soul/image", endpoint: "/images/generations",
+			body: `{"model":"higgsfield/soul/image","prompt":"cat"}`, wantPath: "/images/generations", wantLabel: "RunningHub", wantError: "该模型需要参考图",
 		},
 		{
 			name: "compatible passthrough", protocol: "unknown", model: "future-model", endpoint: "/chat/completions", body: `not JSON`,

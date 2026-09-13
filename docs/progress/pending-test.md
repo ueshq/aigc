@@ -5,6 +5,11 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- RunningHub 渠道配置：个人配置和管理后台新增 RunningHub 协议，接口地址可切换国际站与国内站，只填域名也能请求 `/openapi/v2`。拉取模型返回带 `/video`、`/image`、`/tts` 后缀的家族列表，渠道测试只提示、不生成。OpenAI 协议的“RunningHub LLM”预设可正常对话。未登录直连选择 RunningHub 模型时提示先登录。
+- RunningHub 视频：登录后在创作台、画布和 Agent 中分别验证纯文本、首帧、首尾帧、参考图/视频/音频生成。调用日志中的端点与参数应符合所选家族，任务轮询、成功、失败、取消和超时提示正确。切换家族或参考模式后，清晰度、比例、时长和生成音频选项随之变化；不支持的模式、尾帧缺少首帧、素材超量在提交前提示。无首尾帧端点的家族（如 `rhart-video-v3.1-lite/video`）首帧并入参考图生成。
+- RunningHub 图片与语音：验证文生图、参考图编辑、批量张数和画布图片任务，本地参考图先上传到 RunningHub 再生成。TTS 验证下拉音色（如 `qwen3-tts-flash/tts`）、填写音色 ID（如 `minimax/speech-2.6-hd/tts`）、语速和画布音频任务。长任务应等待至完成或渠道超时，失败时退还算力点。
+- RunningHub 目录与参数映射依据官方 ComfyUI_RH_OpenAPI 注册表生成。本轮已运行 `go test ./...`，以及 RunningHub、渠道协议、MiniMax 和视频相关前端 node 测试（22 项通过）；TypeScript 检查仅剩改动前已有的 8 个错误。未用真实 Key 调用 RunningHub，未运行前端构建和界面验收。
+
 - MiniMax 国内站与水印：个人配置和管理后台的 MiniMax 渠道可在接口地址下方切换国际站 `https://api.minimax.io` 与国内站 `https://api.minimax.cn`，API Key 需与站点对应。视频设置开启“添加水印”时请求携带 `aigc_watermark: true`，关闭时不携带；确认创作台、画布和历史回填一致。
 - MiniMax 查询间隔：创作台、画布和后端轮询中的 MiniMax 任务约 10 秒查询一次；其他协议的视频、图片和音频轮询仍为 5 秒。
 - AI 优化提示词：选择 MiniMax 官方渠道的 MiniMax-H3 后，创作台两种布局和画布视频节点的提示词面板出现“AI 优化”。分别验证纯文本、首尾帧、参考素材输入，确认弹窗可替换或保留提示词，失败、超时均有提示；未登录直连和登录代理均可用，H3-Max 与非官方渠道不显示。登录后为 `MiniMax-H3-Context-IR` 设置算力点时按次扣点。

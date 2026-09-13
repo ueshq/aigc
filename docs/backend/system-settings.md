@@ -108,7 +108,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 协议，支持 OpenAI、Gemini、MiniMax、MiMo |
+| `protocol` | string | 协议，支持 OpenAI、Gemini、MiniMax、MiMo、RunningHub |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | 渠道接口地址 |
 | `apiKey` | string | 渠道密钥 |
@@ -153,3 +153,32 @@ description: settings 表中 public 和 private 配置结构说明
 - 2K 重生成失败后重试仍基于原成片。未使用官方需白名单的 `source_task_id` 方式。
 
 参数依据：[官方创建接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-create)、[官方查询接口](https://platform.minimax.io/docs/api-reference/video-generation-v2-query)、[H3-Context-IR](https://platform.minimax.io/docs/api-reference/video-generation-v2-h3-context-ir)、[视频重生成](https://platform.minimax.io/docs/api-reference/video-generation-v2-regeneration)、[国内站创建接口](https://platform.minimax.cn/docs/api-reference/video-generation-v2-create)。真实官方请求及界面验收见待测试文档。
+
+## RunningHub 协议
+
+`runninghub` 默认地址为国际站 `https://www.runninghub.ai/openapi/v2`，国内站为 `https://www.runninghub.cn/openapi/v2`，只填域名时自动补全 `/openapi/v2`。使用 Bearer API Key，标准模型 API 需要企业共享 Key。仅支持登录后经后端代理调用，未登录的浏览器直连会提示先登录。
+
+模型列表是内置的端点家族，名称以能力结尾：`<家族>/video`、`<家族>/image`、`<家族>/tts`，例如 `kling-v3.0-pro/video`、`seedream-v4.5/image`、`minimax/speech-2.6-hd/tts`。读取模型列表和渠道测试都不发起生成。家族内的具体端点由后端按本次输入自动选择：
+
+| 能力 | 输入 | 端点 |
+| --- | --- | --- |
+| 视频 | 仅提示词 | `text-to-video`；家族没有该端点时使用素材可选的参考端点 |
+| 视频 | 首帧，或首帧加尾帧 | `image-to-video`、`start-end-to-video` 等；家族没有首尾帧端点时，首尾帧并入参考图 |
+| 视频 | 参考图、参考视频、参考音频 | `reference-to-video`、`multimodal-video` 等 |
+| 图片 | 无参考图 / 有参考图 | `text-to-image` / `image-to-image`、`edit` |
+| 语音 | 文本 | 对应 TTS 端点 |
+
+- 视频沿用 `/api/v1/videos` 和后台任务轮询，查询改为 `POST /query`，约 5 秒一次。图片和语音由后端提交任务后等待完成，再返回 `data[].url` 或音频文件；等待上限为渠道超时，默认 600 秒。画布图片和音频任务同样适用。
+- 参数按端点 schema 映射：时长、分辨率、比例和尺寸取最接近的可选值，必填但未设置的参数使用 RunningHub 默认值，其余可选参数不发送。视频设置按当前输入模式展示该家族可用的清晰度、比例、时长和生成音频开关。
+- 本地文件或 Base64 素材先上传到 `POST /media/upload/binary`，公网 URL 直接透传。家族内没有端点能接受当前素材数量或组合时直接报错。
+- 语音音色：有固定列表的模型提供下拉选择，其余模型填写 RunningHub 音色 ID，留空使用模型默认音色。
+- 未接入视频编辑、延长、动作控制、口型、特效、放大、音乐和 3D 端点。
+- 文本对话请另建 OpenAI 协议渠道，Base URL 选择预设“RunningHub LLM”，即 `https://llm.runninghub.ai/v1`。
+
+模型目录由 `scripts/runninghub-registry.mjs` 从官方 [ComfyUI_RH_OpenAPI](https://github.com/HM-RunningHub/ComfyUI_RH_OpenAPI) 的 `models_registry.json` 生成 `service/runninghub_registry.json` 和 `web/src/lib/runninghub-models.ts`。官方新增模型后重新运行：
+
+```bash
+node scripts/runninghub-registry.mjs path/to/models_registry.json
+```
+
+平台别名：`rhart-video-s` 为 Sora 2，`rhart-video-v3.1` 为 Veo 3.1，`rhart-video-g` 为 Grok Imagine，`rhart-video-r` 为 Runway Gen-4 Turbo，`rhart-video-flux3` 为 FLUX 3 Video，`sparkvideo-2.0` 为 Seedance 2.0；`rhart-image-v1`、`rhart-image-n` 为 Nano Banana 系列，`rhart-image-g-1.5`、`rhart-image-g-2` 为 GPT Image，`rhart-image-g`、`rhart-image-g-3`、`rhart-image-g-4`、`rhart-image-x`、`rhart-imagine-image` 为 Grok 图片，`youchuan` 为 Midjourney。带 `-official` 的是官方稳定渠道，其余多为低价渠道。参数依据：[RunningHub API 文档](https://www.runninghub.ai/runninghub-api-doc-en/doc-8287463)。

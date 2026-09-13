@@ -147,7 +147,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	if err != nil {
 		log.Printf("AI proxy normalize %s request failed: model=%s err=%v", prepared.failureLabel, modelName, err)
 		message := "AI 接口请求失败"
-		if prepared.failureLabel == "MiMo TTS" {
+		if prepared.failureLabel == "MiMo TTS" || prepared.failureLabel == "RunningHub" {
 			message = err.Error()
 		}
 		Fail(w, message)
@@ -232,6 +232,9 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 		return
 	}
 
+	if completeRunningHubTask(w, response, channel, logContext, onFailure) {
+		return
+	}
 	if copyMiMoTTSResponse(w, response, logContext, onFailure) {
 		return
 	}
@@ -358,12 +361,16 @@ func readUpstreamAIErrorMessage(body []byte, statusCode int) string {
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
-		Msg     string `json:"msg"`
-		Message string `json:"message"`
+		ErrorMessage string `json:"errorMessage"`
+		Msg          string `json:"msg"`
+		Message      string `json:"message"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &payload) == nil {
 		if payload.Error != nil && strings.TrimSpace(payload.Error.Message) != "" {
 			return payload.Error.Message
+		}
+		if strings.TrimSpace(payload.ErrorMessage) != "" {
+			return payload.ErrorMessage
 		}
 		if strings.TrimSpace(payload.Msg) != "" {
 			return payload.Msg

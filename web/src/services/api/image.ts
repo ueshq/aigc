@@ -4,9 +4,10 @@ import axios from "axios";
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
+import { runningHubModels } from "@/lib/runninghub";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, isGeminiConfig, normalizeGeminiBaseUrl } from "@/lib/gemini";
 import { autoSyncImage, imageToDataUrl, resolveImageUrl, type UploadedImage } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/media";
 import { nanoid } from "nanoid";
@@ -163,6 +164,11 @@ function createImageRequestParams(config: AiConfig): ImageRequestParams {
         timeoutSeconds: IMAGE_REQUEST_TIMEOUT_SECONDS,
         streamPartialImages: normalizeBoundedInteger(config.streamPartialImages, 1, 0, 3),
     };
+}
+
+/** RunningHub image tasks only map the Images API, one image per request, without streaming. */
+function runningHubImageConfig<T extends AiConfig>(config: T): T {
+    return channelProtocolForConfig(config) === "runninghub" ? { ...config, apiMode: "images", streamImages: false, codexCli: false } : config;
 }
 
 function isZhipuImageModel(model: string) {
@@ -678,10 +684,11 @@ async function requestChatImagesSingle(config: AiConfig, prompt: string, inputIm
 }
 
 async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[]): Promise<GeneratedImage[]> {
+    config = runningHubImageConfig(config);
     assertImageReferencesSupported(config.model, references);
     const params = createImageRequestParams(config);
     const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
-    const useConcurrentSingleRequests = isGeminiConfig(config) || config.apiMode === "responses" || config.apiMode === "chat" || config.codexCli || config.streamImages || isZhipuImageModel(config.model);
+    const useConcurrentSingleRequests = channelProtocolForConfig(config) === "runninghub" || isGeminiConfig(config) || config.apiMode === "responses" || config.apiMode === "chat" || config.codexCli || config.streamImages || isZhipuImageModel(config.model);
     if (params.n > 1 && useConcurrentSingleRequests) {
         const results = await Promise.allSettled(Array.from({ length: params.n }, () => requestImages({ ...config, count: "1" }, prompt, references)));
         const images = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
@@ -778,6 +785,7 @@ export async function pollCanvasImageTaskStatus(taskId: string): Promise<CanvasI
 }
 
 async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], params: ImageRequestParams, options: CanvasImageTaskOptions): Promise<RequestInit> {
+    config = runningHubImageConfig(config);
     assertImageReferencesSupported(config.model, references);
     const taskChannelId = channelIdForActiveModel(config);
     const taskChannelHeader: Record<string, string> = config.channelMode === "remote" && taskChannelId ? { "X-Model-Channel-ID": taskChannelId } : {};
@@ -938,6 +946,7 @@ export async function fetchImageModels(config: AiConfig) {
     const channel = localChannelForActiveModel(config);
     if (channel?.protocol === "gemini") return fetchGeminiModels(channel.baseUrl, channel.apiKey);
     if (isMiniMaxChannel(channel)) return [...miniMaxModels];
+    if (channel?.protocol === "runninghub") return [...runningHubModels];
     if (isMimoChannel(channel || { baseUrl: config.baseUrl })) return [...mimoModels];
     try {
         const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(channel?.baseUrl || config.baseUrl, "/models"), {
