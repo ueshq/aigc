@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video } from "lucide-react";
+import { Box, ChevronRight, Image as ImageIcon, LoaderCircle, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -440,7 +440,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </>
             ) : null}
 
-            {!referenceSelectionState && showPanel && !isGroup && renderPanel ? <div className={"absolute left-1/2 top-full z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 pt-4 " + (isCanvasImageNodeType(data.type) || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio ? "w-[622px]" : "w-[500px]")}>{renderPanel(data)}</div> : null}
+            {!referenceSelectionState && showPanel && !isGroup && renderPanel ? <div className={"absolute left-1/2 top-full z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 pt-4 " + (isCanvasImageNodeType(data.type) || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio || data.type === CanvasNodeType.Model3D ? "w-[622px]" : "w-[500px]")}>{renderPanel(data)}</div> : null}
         </div>
     );
 });
@@ -463,6 +463,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
+    [CanvasNodeType.Model3D]: Model3DNodeContent,
     [CanvasNodeType.Director]: EmptyImageContent,
 } satisfies Partial<Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>>;
 
@@ -735,6 +736,33 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
             <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+        </div>
+    );
+}
+
+/** Previews glTF/GLB results with model-viewer, loaded on demand; other 3D formats are offered for download only. */
+function Model3DNodeContent({ node, theme, isSelected }: NodeContentRendererProps) {
+    const url = node.metadata?.content || "";
+    const unsupported = /\.(obj|fbx|stl|usdz)(\?|#|$)/i.test(url);
+    const [viewerReady, setViewerReady] = useState(false);
+    useEffect(() => {
+        if (!url || unsupported) return;
+        let active = true;
+        void import("@google/model-viewer").then(() => active && setViewerReady(true));
+        return () => {
+            active = false;
+        };
+    }, [unsupported, url]);
+    if (!url || unsupported)
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ background: theme.node.fill, color: theme.node.placeholder }}>
+                <Box className="size-7 opacity-35" />
+                <span className="text-sm">{url ? "该 3D 格式暂不支持预览，可下载查看" : "空 3D 节点"}</span>
+            </div>
+        );
+    return (
+        <div className="relative h-full w-full overflow-hidden rounded-[18px]" style={{ background: theme.node.fill }} {...(isSelected ? { "data-canvas-no-zoom": true } : {})} onPointerDown={(event) => isSelected && event.stopPropagation()}>
+            {viewerReady ? React.createElement("model-viewer", { src: url, alt: node.title || "3D 模型", "camera-controls": isSelected ? true : undefined, "auto-rotate": true, "shadow-intensity": "1", style: { width: "100%", height: "100%" } }) : <LoaderCircle className="absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 animate-spin opacity-50" style={{ color: theme.node.text }} />}
         </div>
     );
 }

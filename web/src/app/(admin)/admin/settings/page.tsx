@@ -39,6 +39,7 @@ const emptySettings: AdminSettings = {
             defaultImageModel: "",
             defaultVideoModel: "",
             defaultTextModel: "",
+            defaultModel3dModel: "",
             systemPrompt: "",
             systemPrompts: { image: "", video: "", text: "", workflow: "", workflowAgent: "" },
             allowCustomChannel: true,
@@ -400,6 +401,11 @@ export default function AdminSettingsPage() {
                                     </Col>
                                     <Col xs={24} md={6}>
                                         <Form.Item name={["public", "modelChannel", "defaultTextModel"]} label="默认文本模型">
+                                            <Select showSearch allowClear options={publicModels.map((item) => ({ label: item, value: item }))} />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={6}>
+                                        <Form.Item name={["public", "modelChannel", "defaultModel3dModel"]} label="默认 3D 模型">
                                             <Select showSearch allowClear options={publicModels.map((item) => ({ label: item, value: item }))} />
                                         </Form.Item>
                                     </Col>

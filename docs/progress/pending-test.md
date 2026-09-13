@@ -10,6 +10,14 @@ description: 当前版本已实现但仍需人工验证的变更项
 - RunningHub 图片与语音：验证文生图、参考图编辑、批量张数和画布图片任务，本地参考图先上传到 RunningHub 再生成。TTS 验证下拉音色（如 `qwen3-tts-flash/tts`）、填写音色 ID（如 `minimax/speech-2.6-hd/tts`）、语速和画布音频任务。长任务应等待至完成或渠道超时，失败时退还算力点。
 - RunningHub 工具与音乐：视频创作台和画布用参考视频验证视频编辑、延长、超分、去字幕，动作控制同时连接首帧；缺少必需素材时提示“该模型需要参考视频/首帧”。图片放大家族需要参考图。画布音频节点验证 `suno-v5/single/music` 文生音乐，以及 `minimax/music-cover/music` 连接一个参考音频节点后翻唱。
 - RunningHub 真实接口：`RUNNINGHUB_LIVE=1` 验收已通过 7 个最低价请求，覆盖文生图、上传参考图编辑、vidu 首尾帧、grok 文生视频、去字幕视频工具、speech-02-turbo 语音和 suno-v5 音乐，总耗时约 150 秒；RunningHub 回报的第三方消耗合计约 0.35，语音未回报。Suno 单次返回两段 MP3 和两张封面图，语音与音乐只取第一个音频结果；去字幕结果为 `.mov`，需确认浏览器能播放。目录与参数映射依据官方 ComfyUI_RH_OpenAPI 注册表生成；`go test ./...` 与 RunningHub、渠道协议、MiniMax、视频相关前端 node 测试 22 项通过，TypeScript 检查仅剩改动前已有的 8 个错误。未运行前端构建，界面仍待验收。
+- RunningHub 高级参数：图片、视频、音频设置和画布 3D 参数弹层出现“高级参数”，表单项随家族和参考模式变化。验证 `suno-v5/custom/music` 未填标题或风格标签时提交前提示，`pixverse-v6/effects/video` 选择特效模板、`volc-drama/video-translate/video` 填写翻译参数后请求日志带上对应字段。切换家族后各自的数值互不影响，画布节点修改后只影响该节点。
+- RunningHub 文本与歌词：`/text` 家族出现在文本模型列表，画布文本节点连接图片或视频后用 `rhart-text-g-25-flash/text` 得到描述，纯文本和 Agent 对话可用。音乐高级参数的“AI 写歌词”先要求填写主题，生成后替换歌词框内容，失败时显示原因。
+- RunningHub 提示词优化：RunningHub 渠道的 `minimax/hailuo-h3/video` 在创作台两种布局和画布视频节点显示“AI 优化”，分别验证纯文本、首尾帧和参考素材，确认弹窗可替换或保留提示词。
+- RunningHub 3D：配置弹窗和后台出现 3D 模型分组与默认 3D 模型。画布图片节点提示面板切到“3D”后生成新的 3D 模型节点并连线，节点菜单、配置节点和 Agent `generate_model3d` 也可创建；GLB 结果可拖动旋转，悬停工具栏可下载，刷新页面后未完成任务继续轮询，重试沿用原图片。
+- RunningHub 口型同步：画布视频节点和视频创作台选择 `kling-lip-sync/video`，连接含人脸的视频与音频节点，或只填朗读文本生成。缺少视频、既无音频也无文本、视频无人脸、音频节点缺少时长时分别给出提示。
+- RunningHub 音色克隆与设计（未做真实调用）：`minimax/voice-clone/tts` 连接参考音频节点、`minimax/voice-design/tts` 填写音色描述后提交，高级参数的音色 ID 留空时自动生成。提交后 MiniMax 语音家族的音色设置出现该音色，可点选使用和删除。
+- RunningHub 细节：超分、去字幕、图生 3D 等家族在创作台和画布可不填提示词提交，需要提示词的家族仍禁用按钮或提示。模型选择器显示可读名称并以原始家族名作副标题。去字幕 `.mov` 结果的节点类型为 `video/quicktime`，下载扩展名为 `.mov`。
+- RunningHub 第三轮真实接口（2026-09-13）：`-run TestRunningHubLive/extended` 中歌词、图片理解、Mureka 背景音乐（`n=1`）、Suno custom（标题与风格标签）和图生 3D（hitem3d 512，返回 `.glb`）通过。可灵对口型链路已跑通人脸识别、可灵配音与 MP3 时长测量，但最后的 `lip-sync-video` 两次返回 1007“session_id 已失效”，另用接口直连在识别后数秒内提交也同样失败，失败请求未扣费，需向 RunningHub 反馈后复测。实测发现人脸识别把会话和每张人脸分成多段文本返回，可灵配音只返回 MP3 与音频 ID、不含时长，后端已按此解析。按公开价目表估算本轮约 2.3 元，音色克隆与设计未调用。`go test ./...`、前端 node 测试 25 项通过，TypeScript 检查仅剩改动前已有的 8 个错误；未运行前端构建，界面待验收。
 
 - MiniMax 国内站与水印：个人配置和管理后台的 MiniMax 渠道可在接口地址下方切换国际站 `https://api.minimax.io` 与国内站 `https://api.minimax.cn`，API Key 需与站点对应。视频设置开启“添加水印”时请求携带 `aigc_watermark: true`，关闭时不携带；确认创作台、画布和历史回填一致。
 - MiniMax 查询间隔：创作台、画布和后端轮询中的 MiniMax 任务约 10 秒查询一次；其他协议的视频、图片和音频轮询仍为 5 秒。

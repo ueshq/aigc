@@ -1,5 +1,7 @@
 import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import { normalizeVideoConfig } from "@/lib/video-model-capabilities";
+import { mergeRunningHubParams } from "@/lib/runninghub";
+import { publicHttpUrl } from "@/services/api/ai-request";
 import type { ReferenceImage, ReferenceAudio, ReferenceVideo } from "@/types/media";
 import type { ChatCompletionMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
@@ -143,15 +145,23 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
     });
 }
 
-export function buildNodeChatMessages(context: NodeGenerationContext): ChatCompletionMessage[] {
-    if (!context.referenceImages.length) {
+/** Builds chat messages; RunningHub text families also receive connected videos and audios as public URL parts. */
+export function buildNodeChatMessages(context: NodeGenerationContext, includeMedia = false): ChatCompletionMessage[] {
+    const videos = includeMedia ? context.referenceVideos.map((video) => publicHttpUrl(video.url)).filter(Boolean) : [];
+    const audios = includeMedia ? context.referenceAudios.map((audio) => publicHttpUrl(audio.url)).filter(Boolean) : [];
+    if (!context.referenceImages.length && !videos.length && !audios.length) {
         return [{ role: "user", content: context.prompt }];
     }
 
     return [
         {
             role: "user",
-            content: [{ type: "text" as const, text: context.prompt }, ...context.referenceImages.map((image) => ({ type: "image_url" as const, image_url: { url: image.dataUrl } }))],
+            content: [
+                { type: "text" as const, text: context.prompt },
+                ...context.referenceImages.map((image) => ({ type: "image_url" as const, image_url: { url: image.dataUrl } })),
+                ...videos.map((url) => ({ type: "video_url" as const, video_url: { url } })),
+                ...audios.map((url) => ({ type: "audio_url" as const, audio_url: { url } })),
+            ],
         },
     ];
 }
@@ -233,21 +243,26 @@ function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
 }
 
 export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasGenerationMode): AiConfig {
-    const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
-    const channelId = node?.metadata?.channelId || "";
+    const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : mode === "model3d" ? config.model3dModel : config.textModel;
+    // Image nodes keep their image model in metadata; the 3D mode only reuses a stored 3D model.
+    const nodeModel = mode === "model3d" && !/\/model3d$/.test(node?.metadata?.model || "") ? "" : node?.metadata?.model;
+    const channelId = mode === "model3d" && !nodeModel ? "" : node?.metadata?.channelId || "";
     const imageChannelId = mode === "image" ? channelId || config.imageChannelId : config.imageChannelId;
     const videoChannelId = mode === "video" ? channelId || config.videoChannelId : config.videoChannelId;
     const textChannelId = mode === "text" ? channelId || config.textChannelId : config.textChannelId;
     const audioChannelId = mode === "audio" ? channelId || config.audioChannelId : config.audioChannelId;
-    const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || config.activeChannelId : config.activeChannelId;
+    const model3dChannelId = mode === "model3d" ? channelId || config.model3dChannelId : config.model3dChannelId;
+    const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || config.activeChannelId : mode === "model3d" ? model3dChannelId : config.activeChannelId;
     const result: AiConfig = {
         ...config,
-        model: mode === "text" ? resolveModelForCapability(config, node?.metadata?.model, "text") : node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        model: mode === "text" ? resolveModelForCapability(config, node?.metadata?.model, "text") : nodeModel || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
         activeChannelId,
         imageChannelId,
         videoChannelId,
         textChannelId,
         audioChannelId,
+        model3dChannelId,
+        runningHubParams: mergeRunningHubParams(config.runningHubParams, node?.metadata?.runningHubParams),
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size),
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,

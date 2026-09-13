@@ -42,6 +42,7 @@ import {
     type WorkflowExternalTaskSuccess,
 } from "@/components/workflows/creative-workflow-workspace";
 import { normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { runningHubPromptOptional } from "@/lib/runninghub";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -167,7 +168,7 @@ export default function ImagePage() {
     const effectiveConfigRef = useRef(effectiveConfig);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
+    const canGenerate = Boolean(prompt.trim()) || runningHubPromptOptional(effectiveConfig, model);
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.images.length).length;
@@ -951,12 +952,12 @@ export default function ImagePage() {
 
     const buildRequestSnapshot = ({ promptText = prompt, referenceItems = references, taskCount = generationCount, configOverride }: { promptText?: string; referenceItems?: ReferenceImage[]; taskCount?: number; configOverride?: Partial<GenerationLogConfig> } = {}) => {
         const text = promptText.trim();
-        if (!text) {
+        const baseConfig = { ...effectiveConfig, ...configOverride };
+        const requestModel = configOverride?.imageModel || configOverride?.model || model;
+        if (!text && !runningHubPromptOptional(effectiveConfig, requestModel)) {
             message.error("请输入生图提示词");
             return null;
         }
-        const baseConfig = { ...effectiveConfig, ...configOverride };
-        const requestModel = configOverride?.imageModel || configOverride?.model || model;
         const requestChannelId = resolveImageChannelId(baseConfig, requestModel, configOverride?.imageChannelId, configOverride?.activeChannelId, baseConfig.imageChannelId, baseConfig.activeChannelId);
         if (!isAiConfigReady(baseConfig, requestModel)) {
             message.warning("请先完成配置");

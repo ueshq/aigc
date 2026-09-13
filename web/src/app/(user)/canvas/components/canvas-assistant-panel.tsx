@@ -4,6 +4,7 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, us
 import {
     History,
     Bot,
+    Box,
     Clapperboard,
     Copy,
     Cpu,
@@ -68,6 +69,7 @@ const ASSISTANT_NODE_TYPE_META = {
     [CanvasNodeType.Panorama]: { Icon: ImageIcon, label: "全景图" },
     [CanvasNodeType.Video]: { Icon: Video, label: "视频" },
     [CanvasNodeType.Audio]: { Icon: Music2, label: "音频" },
+    [CanvasNodeType.Model3D]: { Icon: Box, label: "3D 模型" },
     [CanvasNodeType.Text]: { Icon: Type, label: "文本" },
     [CanvasNodeType.Config]: { Icon: Settings2, label: "生成配置" },
     [CanvasNodeType.Director]: { Icon: Clapperboard, label: "导演台" },

@@ -2,8 +2,10 @@ package service
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -24,7 +26,7 @@ func TestRunningHubRegistryFamilies(t *testing.T) {
 	}
 	for name, modes := range runningHubRegistry().Families {
 		kind := name[strings.LastIndex(name, "/")+1:]
-		if kind != "video" && kind != "image" && kind != "tts" && kind != "music" || len(modes) == 0 {
+		if kind != "video" && kind != "image" && kind != "tts" && kind != "music" && kind != "text" && kind != "model3d" || len(modes) == 0 {
 			t.Errorf("family %q needs a capability suffix and modes", name)
 		}
 		for mode, endpoints := range modes {
@@ -68,6 +70,11 @@ func TestSelectRunningHubEndpoint(t *testing.T) {
 		{"music", "suno-v5/single/music", nil, "rhart-audio/suno-v5/single", ""},
 		{"music cover needs audio", "minimax/music-cover/music", nil, "", "该模型需要参考音频"},
 		{"music cover", "minimax/music-cover/music", map[string][]RunningHubMedia{"audios": urls(1)}, "minimax/music-cover", ""},
+		{"image to 3D", "hitem3d-v15/model3d", map[string][]RunningHubMedia{"images": urls(1)}, "hitem3d-v15/image-to-3d", ""},
+		{"multi-view 3D", "hitem3d-v15/model3d", map[string][]RunningHubMedia{"images": urls(3)}, "hitem3d-v15/multi-image-to-3d", ""},
+		{"text to 3D", "hunyuan3d-v3.1/model3d", nil, "hunyuan3d-v3.1/text-to-3d", ""},
+		{"video understanding", "rhart-text-g-25-flash/text", map[string][]RunningHubMedia{"videos": urls(1)}, "rhart-text-g-25-flash/video-to-text", ""},
+		{"lyrics", "suno/lyrics/text", nil, "rhart-audio/suno/lyrics", ""},
 		{"unknown family", "kling-v3.0-pro", nil, "", "RunningHub 暂不支持模型 kling-v3.0-pro"},
 	}
 	for _, test := range tests {
@@ -145,12 +152,15 @@ func TestParseRunningHubTask(t *testing.T) {
 	}
 }
 
-func TestRunningHubAudioURL(t *testing.T) {
-	urls := []string{"https://cdn.example/cover.jpg", "https://cdn.example/song.mp3?sign=1"}
-	if got := RunningHubAudioURL(urls); got != urls[1] {
-		t.Fatalf("got %q", got)
+func TestRunningHubResultURL(t *testing.T) {
+	urls := []string{"https://cdn.example/cover.jpg", "https://cdn.example/model.obj", "https://cdn.example/song.mp3?sign=1", "https://cdn.example/model.glb"}
+	if got := RunningHubResultURL(urls, "audio"); got != urls[2] {
+		t.Fatalf("audio got %q", got)
 	}
-	if got := RunningHubAudioURL(urls[:1]); got != urls[0] {
+	if got := RunningHubResultURL(urls, "model3d"); got != urls[3] {
+		t.Fatalf("model got %q", got)
+	}
+	if got := RunningHubResultURL(urls[:1], "audio"); got != urls[0] {
 		t.Fatalf("fallback got %q", got)
 	}
 }
@@ -211,5 +221,152 @@ func TestUploadRunningHubMedia(t *testing.T) {
 	}
 	if _, err := UploadRunningHubMedia(channel, RunningHubMedia{URL: "blob:local"}); err == nil || calls != 1 {
 		t.Fatalf("blob URL got %v after %d uploads", err, calls)
+	}
+}
+
+func TestRunningHubAdvancedParams(t *testing.T) {
+	image := func(urls ...string) map[string][]RunningHubMedia {
+		media := make([]RunningHubMedia, len(urls))
+		for index, url := range urls {
+			media[index] = RunningHubMedia{URL: url}
+		}
+		return map[string][]RunningHubMedia{"images": media}
+	}
+	tests := []struct {
+		name, endpoint string
+		inputs         RunningHubInputs
+		want, err      string
+	}{
+		{"required text params", "rhart-audio/suno-v5/custom", RunningHubInputs{Prompt: "calm piano", Extra: map[string]any{"title": " Rain ", "tags": "piano"}}, `{"title":"Rain","prompt":"calm piano","tags":"piano"}`, ""},
+		{"missing required text param", "rhart-audio/suno-v5/custom", RunningHubInputs{Prompt: "calm piano", Extra: map[string]any{"title": "Rain"}}, "", "请填写参数 tags"},
+		{"numbers convert by type", "mureka-ai/mureka-v9/generate-bgm", RunningHubInputs{Prompt: "lofi", Extra: map[string]any{"n": "1"}}, `{"prompt":"lofi","n":1}`, ""},
+		{"list values must match an option", "hitem3d-v15/image-to-3d", RunningHubInputs{Extra: map[string]any{"resolution": "512", "requestType": "unknown"}, Media: image("https://media.example/a.png")}, `{"requestType":"mesh","imageUrl":"https://media.example/a.png","resolution":"512"}`, ""},
+		{"booleans and media keys", "hunyuan3d-v3.1/image-to-3d", RunningHubInputs{Extra: map[string]any{"enablePbr": true, "imageUrl": "https://other.example/x.png"}, Media: image("https://media.example/a.png", "https://media.example/b.png")}, `{"enablePbr":true,"generateType":"Normal","imageUrl":"https://media.example/a.png","leftImageUrl":"https://media.example/b.png"}`, ""},
+		{"views fill in schema order", "hitem3d-v15/multi-image-to-3d", RunningHubInputs{Media: image("https://media.example/front.png", "https://media.example/back.png")}, `{"requestType":"mesh","frontImageUrl":"https://media.example/front.png","backImageUrl":"https://media.example/back.png","resolution":"1024"}`, ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := BuildRunningHubPayload(test.endpoint, test.inputs)
+			if test.err != "" {
+				if err == nil || err.Error() != test.err {
+					t.Fatalf("got %s, %v; want error %q", got, err, test.err)
+				}
+				return
+			}
+			var gotValue, wantValue any
+			if err != nil || json.Unmarshal(got, &gotValue) != nil || json.Unmarshal([]byte(test.want), &wantValue) != nil || !reflect.DeepEqual(gotValue, wantValue) {
+				t.Fatalf("got %s, %v; want %s", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestParseRunningHubTextResult(t *testing.T) {
+	task, ok := ParseRunningHubTask([]byte(`{"taskId":"2013","status":"SUCCESS","results":[{"url":null,"outputType":"text","text":"A red apple."},{"url":null,"outputType":"text","text":"Fruit","name":"title"}]}`))
+	if !ok || task.Status != "completed" || task.Text != "A red apple." || !reflect.DeepEqual(task.Texts, []string{"A red apple.", "Fruit"}) || len(task.URLs) != 0 || task.Error != "" {
+		t.Fatalf("got %+v, %v", task, ok)
+	}
+	facts := runningHubJSONFacts(`"{\"data\":{\"session_id\":\"s1\",\"face_data\":[{\"face_id\":\"f1\",\"start_time\":200}]}}"`)
+	if facts["sessionid"] != "s1" || facts["faceid"] != "f1" || facts["starttime"] != "200" {
+		t.Fatalf("facts %v", facts)
+	}
+}
+
+func runningHubTestMP3(frames int) []byte {
+	frame := make([]byte, 417) // MPEG-1 Layer III, 128 kbps, 44.1 kHz, no padding
+	copy(frame, []byte{0xFF, 0xFB, 0x90, 0x00})
+	return append([]byte("ID3\x03\x00\x00\x00\x00\x00\x0a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"), slices.Repeat(frame, frames)...)
+}
+
+func TestRunningHubAudioDurationMs(t *testing.T) {
+	wav := make([]byte, 44+64000)
+	copy(wav, "RIFF")
+	binary.LittleEndian.PutUint32(wav[4:], uint32(len(wav)-8))
+	copy(wav[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(wav[16:], 16)
+	binary.LittleEndian.PutUint16(wav[20:], 1)
+	binary.LittleEndian.PutUint16(wav[22:], 1)
+	binary.LittleEndian.PutUint32(wav[24:], 16000)
+	binary.LittleEndian.PutUint32(wav[28:], 32000)
+	binary.LittleEndian.PutUint16(wav[32:], 2)
+	binary.LittleEndian.PutUint16(wav[34:], 16)
+	copy(wav[36:], "data")
+	binary.LittleEndian.PutUint32(wav[40:], 64000)
+	tests := map[string]struct {
+		data []byte
+		want int
+	}{
+		"mp3 with ID3 tag": {runningHubTestMP3(123), 123 * 1152 * 1000 / 44100},
+		"pcm wav":          {wav, 2000},
+		"not audio":        {[]byte("oops"), 0},
+	}
+	for name, test := range tests {
+		if got := runningHubAudioDurationMs(test.data); got != test.want {
+			t.Errorf("%s: got %d ms, want %d", name, got, test.want)
+		}
+	}
+}
+
+func TestPrepareRunningHubLipSync(t *testing.T) {
+	previousInterval, previousTransport, previousDownload := runningHubPollInterval, http.DefaultTransport, runningHubDownload
+	t.Cleanup(func() {
+		runningHubPollInterval, http.DefaultTransport, runningHubDownload = previousInterval, previousTransport, previousDownload
+	})
+	runningHubPollInterval = time.Millisecond
+	speechMs := 123 * 1152 * 1000 / 44100
+	runningHubDownload = func(url string) ([]byte, string, error) {
+		if url == "https://cdn.example/speech.mp3" || url == "https://media.example/voice.mp3" {
+			return runningHubTestMP3(123), "audio/mpeg", nil
+		}
+		return []byte("oops"), "text/plain", nil
+	}
+	submitted := map[string]string{}
+	http.DefaultTransport = protocolAdminTransport(func(request *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(request.Body)
+		path := strings.TrimPrefix(request.URL.Path, "/openapi/v2/")
+		switch {
+		case path == "query" && strings.Contains(string(body), `"face"`):
+			// Real shape: a face preview, then the session and each face as separate JSON texts.
+			return protocolAdminResponse(`{"taskId":"face","status":"SUCCESS","results":[{"url":"https://cdn.example/face.jpg","outputType":"jpg","text":null},{"url":null,"outputType":"text","text":"{\"session_id\":\"s1\"}"},{"url":null,"outputType":"text","text":"{\"end_time\":8300,\"face_id\":\"f1\",\"start_time\":200}"}]}`), nil
+		case path == "query":
+			// Real shape: the MP3 and a bare audio ID, without the duration.
+			return protocolAdminResponse(`{"taskId":"speech","status":"SUCCESS","results":[{"url":"https://cdn.example/speech.mp3","outputType":"mp3","text":null},{"url":null,"outputType":"text","text":"928033620248772694"}]}`), nil
+		case path == "kling-lip-sync/identify-face" || path == "kling-lip-sync/tts":
+			submitted[path] = string(body)
+			return protocolAdminResponse(map[string]string{"kling-lip-sync/identify-face": `{"taskId":"face","status":"QUEUED"}`, "kling-lip-sync/tts": `{"taskId":"speech","status":"QUEUED"}`}[path]), nil
+		}
+		t.Errorf("unexpected request %s %s", request.URL, body)
+		return nil, errors.New("unexpected request")
+	})
+	channel := model.ModelChannel{Protocol: "runninghub", BaseURL: "https://www.runninghub.ai", APIKey: "test-key"}
+	video := []RunningHubMedia{{URL: "https://media.example/face.mp4"}}
+	voice := []RunningHubMedia{{URL: "https://media.example/voice.mp3"}}
+	check := func(inputs RunningHubInputs, want string) {
+		t.Helper()
+		got, err := PrepareRunningHubLipSync(channel, inputs)
+		var gotValue, wantValue any
+		if err != nil || json.Unmarshal(got, &gotValue) != nil || json.Unmarshal([]byte(want), &wantValue) != nil || !reflect.DeepEqual(gotValue, wantValue) {
+			t.Fatalf("got %s, %v; want %s", got, err, want)
+		}
+	}
+	check(RunningHubInputs{Prompt: "你好", Media: map[string][]RunningHubMedia{"videos": video}, Extra: map[string]any{"voiceId": "ai_kaiya", "soundVolume": "1.5"}}, fmt.Sprintf(`{"sessionId":"s1","faceId":"f1","audioUrl":"https://cdn.example/speech.mp3","soundStartTime":0,"soundEndTime":%d,"soundInsertTime":200,"soundVolume":1.5}`, speechMs))
+	if submitted["kling-lip-sync/identify-face"] != `{"videoUrl":"https://media.example/face.mp4"}` || !strings.Contains(submitted["kling-lip-sync/tts"], `"text":"你好"`) || !strings.Contains(submitted["kling-lip-sync/tts"], `"voiceId":"ai_kaiya"`) {
+		t.Fatalf("submitted %v", submitted)
+	}
+	delete(submitted, "kling-lip-sync/tts")
+	check(RunningHubInputs{Media: map[string][]RunningHubMedia{"videos": video, "audios": voice}, AudioDurationMs: 4100}, `{"sessionId":"s1","faceId":"f1","audioUrl":"https://media.example/voice.mp3","soundStartTime":0,"soundEndTime":4100,"soundInsertTime":200}`)
+	check(RunningHubInputs{Media: map[string][]RunningHubMedia{"videos": video, "audios": voice}}, fmt.Sprintf(`{"sessionId":"s1","faceId":"f1","audioUrl":"https://media.example/voice.mp3","soundStartTime":0,"soundEndTime":%d,"soundInsertTime":200}`, speechMs))
+	check(RunningHubInputs{Media: map[string][]RunningHubMedia{"videos": video, "audios": voice}, AudioDurationMs: 9000}, `{"sessionId":"s1","faceId":"f1","audioUrl":"https://media.example/voice.mp3","soundStartTime":0,"soundEndTime":8100,"soundInsertTime":200}`)
+	if _, called := submitted["kling-lip-sync/tts"]; called {
+		t.Fatal("reference audio should skip Kling TTS")
+	}
+	for inputs, want := range map[*RunningHubInputs]string{
+		{Prompt: "hi"}: "该模型需要参考视频",
+		{Media: map[string][]RunningHubMedia{"videos": video}}:                                                        "请连接参考音频，或输入要朗读的文本",
+		{Media: map[string][]RunningHubMedia{"videos": video, "audios": {{URL: "https://media.example/broken.mp3"}}}}: "无法获取音频时长，请重新连接参考音频节点",
+	} {
+		if _, err := PrepareRunningHubLipSync(channel, *inputs); err == nil || err.Error() != want {
+			t.Fatalf("%+v: got %v; want %q", *inputs, err, want)
+		}
 	}
 }

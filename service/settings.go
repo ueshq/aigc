@@ -194,6 +194,7 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, isTextModelName)
 	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, isImageModelName)
 	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, isVideoModelName)
+	setting.ModelChannel.DefaultModel3dModel = repairDefaultModel(setting.ModelChannel.DefaultModel3dModel, setting.ModelChannel.AvailableModels, isModel3dModelName)
 	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, isTextModelName)
 	return setting
 }
@@ -436,7 +437,11 @@ func isImageModelName(modelName string) bool {
 
 func isTextModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !strings.HasSuffix(name, "/tts") && !strings.HasSuffix(name, "/music")
+	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !strings.HasSuffix(name, "/tts") && !strings.HasSuffix(name, "/music") && !isModel3dModelName(modelName)
+}
+
+func isModel3dModelName(modelName string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(modelName)), "/model3d")
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {

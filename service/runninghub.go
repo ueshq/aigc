@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,15 @@ const ModelChannelProtocolRunningHub = "runninghub"
 var runningHubRegistryJSON []byte
 
 var runningHubMediaLabels = map[string]string{"first": "首帧", "last": "尾帧", "images": "参考图", "videos": "参考视频", "audios": "参考音频"}
+
+// RunningHubLipSyncModel chains Kling face identification, optional Kling TTS and lip-sync-video in one request.
+const RunningHubLipSyncModel = "kling-lip-sync/video"
+
+// runningHubResultExtensions lists preferred result files per output kind, since tasks can also return previews and covers.
+var runningHubResultExtensions = map[string][]string{
+	"audio":   {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus"},
+	"model3d": {".glb", ".gltf", ".usdz", ".obj", ".fbx", ".stl"},
+}
 
 // runningHubPollInterval follows the RunningHub API contract's 5-second polling guidance.
 var runningHubPollInterval = 5 * time.Second
@@ -82,13 +92,19 @@ type RunningHubInputs struct {
 	Voice         string
 	Count         int
 	Speed         float64
-	Media         map[string][]RunningHubMedia // keyed by runningHubMediaLabels roles
+	// AudioDurationMs is the reference audio length, needed to trim audio for lip sync.
+	AudioDurationMs int
+	Media           map[string][]RunningHubMedia // keyed by runningHubMediaLabels roles
+	// Extra holds advanced parameters from the settings panel, keyed by schema field.
+	Extra map[string]any
 }
 
 type RunningHubTask struct {
 	TaskID string
 	Status string // queued, processing, completed or failed
 	URLs   []string
+	Text   string   // first non-URL text result, e.g. lyrics, captions or JSON from helper endpoints
+	Texts  []string // every non-URL text result; helper endpoints split facts such as session and face across them
 	Error  string
 	Raw    []byte
 }
@@ -172,7 +188,8 @@ func runningHubEndpointFits(params []runningHubParam, media map[string][]Running
 	return true
 }
 
-// BuildRunningHubPayload maps inputs onto the endpoint schema; required fields without an input use the schema default.
+// BuildRunningHubPayload maps advanced parameters and inputs onto the endpoint schema. Required fields without a value
+// use the schema default, except free-text fields whose defaults are only samples.
 func BuildRunningHubPayload(endpoint string, inputs RunningHubInputs) ([]byte, error) {
 	params := runningHubRegistry().Endpoints[endpoint]
 	payload := map[string]any{}
@@ -186,19 +203,45 @@ func BuildRunningHubPayload(endpoint string, inputs RunningHubInputs) ([]byte, e
 		if param.Use == "prompt" && param.Required && strings.TrimSpace(inputs.Prompt) == "" {
 			return nil, errors.New("请输入提示词")
 		}
-		value := runningHubParamValue(param, inputs, used, sizedByPixels)
-		if value == nil && param.Required {
+		value, ok := runningHubExtraValue(param, inputs.Extra[param.Key])
+		if !ok {
+			value = runningHubParamValue(param, inputs, used, sizedByPixels)
+		}
+		if value == nil && param.Required && (param.Use != "" || param.Type != "STRING") {
 			value = param.Default
 		}
 		if value == nil {
 			if param.Required {
-				return nil, fmt.Errorf("RunningHub 缺少参数 %s", param.Key)
+				return nil, fmt.Errorf("请填写参数 %s", param.Key)
 			}
 			continue
 		}
 		payload[param.Key] = value
 	}
 	return json.Marshal(payload)
+}
+
+// runningHubExtraValue converts an advanced parameter to the schema type; ok is false when unset, invalid or a media field.
+func runningHubExtraValue(param runningHubParam, raw any) (any, bool) {
+	text := strings.TrimSpace(fmt.Sprint(raw))
+	if raw == nil || text == "" || runningHubMediaLabels[param.Use] != "" {
+		return nil, false
+	}
+	switch param.Type {
+	case "LIST", "SIZE":
+		value := runningHubOption(param, func(option string) (float64, bool) { return 0, option == text })
+		return value, value != nil
+	case "BOOLEAN":
+		value, err := strconv.ParseBool(text)
+		return value, err == nil
+	case "INT", "FLOAT":
+		number, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return nil, false
+		}
+		return runningHubNumberValue(param, number), true
+	}
+	return text, true
 }
 
 func runningHubParamValue(param runningHubParam, inputs RunningHubInputs, used map[string]int, sizedByPixels bool) any {
@@ -429,8 +472,16 @@ func ParseRunningHubTask(payload []byte) (RunningHubTask, bool) {
 	task := RunningHubTask{TaskID: text(root.TaskID), Status: NormalizeVideoTaskStatus(root.Status), Raw: payload}
 	for _, result := range root.Results {
 		for _, key := range []string{"url", "outputUrl", "text", "content", "output"} {
-			if value := strings.TrimSpace(fmt.Sprint(result[key])); strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+			value := runningHubResultText(result[key])
+			if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
 				task.URLs = append(task.URLs, value)
+				break
+			}
+			if value != "" && key != "url" && key != "outputUrl" {
+				if task.Text == "" {
+					task.Text = value
+				}
+				task.Texts = append(task.Texts, value)
 				break
 			}
 		}
@@ -440,10 +491,18 @@ func ParseRunningHubTask(payload []byte) (RunningHubTask, bool) {
 		task.Status, task.Error = "failed", firstVideoTaskValue(root.ErrorMessage, root.Message, root.Msg, "RunningHub 错误码 "+errorCode)
 	case task.Status == "failed":
 		task.Error = "RunningHub 任务失败或已取消"
-	case task.Status == "completed" && len(task.URLs) == 0:
+	case task.Status == "completed" && len(task.URLs) == 0 && task.Text == "":
 		task.Status, task.Error = "failed", "RunningHub 任务完成但没有返回结果"
 	}
 	return task, task.TaskID != "" || root.Status != "" || task.Error != ""
+}
+
+func runningHubResultText(value any) string {
+	if text, ok := value.(string); ok || value == nil {
+		return strings.TrimSpace(text)
+	}
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }
 
 // NewRunningHubQueryRequest builds the authenticated POST {base}/query request for a task.
@@ -560,12 +619,13 @@ func UploadRunningHubMedia(channel model.ModelChannel, media RunningHubMedia) (s
 	return result.Data.DownloadURL, nil
 }
 
-// RunningHubAudioURL picks the first audio result, since music tasks also return cover images.
-func RunningHubAudioURL(urls []string) string {
-	for _, url := range urls {
-		switch strings.ToLower(path.Ext(strings.Split(url, "?")[0])) {
-		case ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus":
-			return url
+// RunningHubResultURL picks the preferred result file for an output kind ("audio" or "model3d"), else the first URL.
+func RunningHubResultURL(urls []string, kind string) string {
+	for _, extension := range runningHubResultExtensions[kind] {
+		for _, url := range urls {
+			if strings.EqualFold(path.Ext(strings.Split(url, "?")[0]), extension) {
+				return url
+			}
 		}
 	}
 	return urls[0]
@@ -587,4 +647,195 @@ func DownloadRunningHubResult(url string) ([]byte, string, error) {
 		contentType = http.DetectContentType(data)
 	}
 	return data, contentType, err
+}
+
+// runningHubDownload fetches result files; tests replace it because the safe proxy client bypasses mocked transports.
+var runningHubDownload = DownloadRunningHubResult
+
+// runningHubAudioDurationMs measures an MP3 (MPEG Layer III frames, optional ID3v2 tag) or WAV file, returning 0 otherwise.
+func runningHubAudioDurationMs(data []byte) int {
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
+		byteRate, dataSize := 0, 0
+		for offset := 12; offset+8 <= len(data); {
+			size := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+			switch string(data[offset : offset+4]) {
+			case "fmt ":
+				if offset+20 <= len(data) {
+					byteRate = int(binary.LittleEndian.Uint32(data[offset+16 : offset+20]))
+				}
+			case "data":
+				dataSize = min(size, len(data)-offset-8)
+			}
+			offset += 8 + size + size%2
+		}
+		if byteRate == 0 {
+			return 0
+		}
+		return dataSize * 1000 / byteRate
+	}
+	offset := 0
+	if len(data) >= 10 && string(data[:3]) == "ID3" {
+		offset = 10 + (int(data[6]&0x7f)<<21 | int(data[7]&0x7f)<<14 | int(data[8]&0x7f)<<7 | int(data[9]&0x7f))
+	}
+	samples, sampleRate := 0, 0
+	for offset+4 <= len(data) {
+		b1, b2 := data[offset+1], data[offset+2]
+		version, layer, bitrateIndex, rateIndex := b1>>3&3, b1>>1&3, int(b2>>4), int(b2>>2&3)
+		if data[offset] != 0xFF || b1&0xE0 != 0xE0 || version == 1 || layer != 1 || bitrateIndex == 0 || bitrateIndex == 15 || rateIndex == 3 {
+			offset++
+			continue
+		}
+		rate, bitrate, frameSamples, slot := [3]int{44100, 48000, 32000}[rateIndex], [15]int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}[bitrateIndex], 1152, 144
+		if version != 3 { // MPEG-2 halves the sample rate, MPEG-2.5 quarters it
+			rate, bitrate, frameSamples, slot = rate/2, [15]int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}[bitrateIndex], 576, 72
+			if version == 0 {
+				rate /= 2
+			}
+		}
+		samples, sampleRate = samples+frameSamples, rate
+		offset += slot*bitrate*1000/rate + int(b2>>1&1)
+	}
+	if sampleRate == 0 {
+		return 0
+	}
+	return samples * 1000 / sampleRate
+}
+
+// runRunningHubTask submits one endpoint request and waits for its result.
+func runRunningHubTask(channel model.ModelChannel, endpoint string, inputs RunningHubInputs) (RunningHubTask, error) {
+	body, err := BuildRunningHubPayload(endpoint, inputs)
+	if err != nil {
+		return RunningHubTask{}, err
+	}
+	request, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/"+endpoint), bytes.NewReader(body))
+	if err != nil {
+		return RunningHubTask{}, err
+	}
+	SetModelChannelAuthHeader(request, channel)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := HTTPClientForChannel(channel).Do(request)
+	if err != nil {
+		return RunningHubTask{}, err
+	}
+	defer response.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if response.StatusCode >= http.StatusBadRequest {
+		task, _ := ParseRunningHubTask(payload)
+		return task, errors.New(firstVideoTaskValue(task.Error, fmt.Sprintf("RunningHub 请求失败：%d", response.StatusCode)))
+	}
+	return WaitRunningHubTask(channel, payload)
+}
+
+// PrepareRunningHubLipSync identifies the face in the reference video, synthesizes speech with Kling TTS when no
+// reference audio is given, and returns the lip-sync-video submit body for the shared video task flow. Audio without a
+// known duration is downloaded and measured.
+func PrepareRunningHubLipSync(channel model.ModelChannel, inputs RunningHubInputs) ([]byte, error) {
+	videos, audios := inputs.Media["videos"], inputs.Media["audios"]
+	if len(videos) == 0 {
+		return nil, errors.New("该模型需要参考视频")
+	}
+	if len(audios) == 0 && strings.TrimSpace(inputs.Prompt) == "" {
+		return nil, errors.New("请连接参考音频，或输入要朗读的文本")
+	}
+	face, err := runRunningHubTask(channel, "kling-lip-sync/identify-face", RunningHubInputs{Media: map[string][]RunningHubMedia{"videos": videos[:1]}})
+	if err != nil {
+		return nil, fmt.Errorf("人脸识别失败：%w", err)
+	}
+	faceFacts := runningHubTaskFacts(face)
+	if faceFacts["sessionid"] == "" || faceFacts["faceid"] == "" {
+		return nil, errors.New("参考视频中没有识别到可对口型的人脸")
+	}
+	extra := map[string]any{}
+	for key, value := range inputs.Extra {
+		extra[key] = value
+	}
+	insertMs, _ := strconv.Atoi(faceFacts["starttime"])
+	extra["sessionId"], extra["faceId"], extra["soundStartTime"], extra["soundInsertTime"] = faceFacts["sessionid"], faceFacts["faceid"], 0, insertMs
+	lipSync := RunningHubInputs{Extra: extra, Media: map[string][]RunningHubMedia{"audios": audios}}
+	durationMs := inputs.AudioDurationMs
+	if len(audios) == 0 {
+		speech, err := runRunningHubTask(channel, "kling-lip-sync/tts", RunningHubInputs{Prompt: inputs.Prompt, Extra: inputs.Extra})
+		if err != nil {
+			return nil, fmt.Errorf("口型配音生成失败：%w", err)
+		}
+		// Kling TTS returns the MP3 and a bare audio ID without its duration, so the MP3 is measured below.
+		speechURL := RunningHubResultURL(speech.URLs, "audio")
+		if speechURL == "" {
+			return nil, errors.New("口型配音没有返回音频")
+		}
+		lipSync.Media["audios"], durationMs = []RunningHubMedia{{URL: speechURL}}, 0
+	}
+	if durationMs <= 0 {
+		if data, _, err := runningHubDownload(lipSync.Media["audios"][0].URL); err == nil {
+			durationMs = runningHubAudioDurationMs(data)
+		}
+	}
+	if durationMs <= 0 {
+		return nil, errors.New("无法获取音频时长，请重新连接参考音频节点")
+	}
+	// The dubbed span has to stay inside the detected face window.
+	if faceEnd, err := strconv.Atoi(faceFacts["endtime"]); err == nil && faceEnd > insertMs {
+		durationMs = min(durationMs, faceEnd-insertMs)
+	}
+	extra["soundEndTime"] = durationMs
+	return BuildRunningHubPayload("kling-lip-sync/lip-sync-video", lipSync)
+}
+
+// runningHubTaskFacts merges the JSON facts of every text result; earlier results win.
+func runningHubTaskFacts(task RunningHubTask) map[string]string {
+	facts := map[string]string{}
+	for _, text := range task.Texts {
+		for key, value := range runningHubJSONFacts(text) {
+			if _, seen := facts[key]; !seen {
+				facts[key] = value
+			}
+		}
+	}
+	return facts
+}
+
+// runningHubJSONFacts collects the first scalar per key from a JSON text result, keyed in lower case without underscores.
+// Shallower values win over nested ones.
+func runningHubJSONFacts(text string) map[string]string {
+	facts := map[string]string{}
+	decode := func(value string) (any, bool) {
+		var root any
+		decoder := json.NewDecoder(strings.NewReader(value))
+		decoder.UseNumber()
+		return root, decoder.Decode(&root) == nil
+	}
+	root, ok := decode(text)
+	if nested, isString := root.(string); ok && isString {
+		root, ok = decode(nested)
+	}
+	if !ok {
+		return facts
+	}
+	queue := []any{root}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		switch typed := node.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				name := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+				switch value := typed[key].(type) {
+				case string, json.Number, bool:
+					if _, seen := facts[name]; !seen {
+						facts[name] = strings.TrimSpace(fmt.Sprint(value))
+					}
+				default:
+					queue = append(queue, value)
+				}
+			}
+		case []any:
+			queue = append(queue, typed...)
+		}
+	}
+	return facts
 }

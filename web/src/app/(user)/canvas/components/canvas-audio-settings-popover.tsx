@@ -10,6 +10,7 @@ import { AudioSettingsPanel, type AudioSettingKey } from "@/components/audio-set
 import { audioFormatLabel, audioSpeedLabel, audioVoiceLabel, glmTtsVoiceLabel, isGlmTtsModel, normalizeGlmTtsFormat, normalizeGlmTtsSpeed } from "@/lib/audio-generation";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsVoiceLabel, normalizeMimoTtsFormat } from "@/lib/mimo-tts";
+import { normalizeRunningHubVoice, runningHubModelInfo } from "@/lib/runninghub";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { ResourceSinglePicker, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
@@ -98,7 +99,7 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             <div className="space-y-4">
                 <div className="text-lg font-semibold">音频设置</div>
-                {isMimoVoiceCloneModel(model) ? (
+                {isMimoVoiceCloneModel(model) || runningHubModelInfo(model)?.modes?.reference?.requires?.includes("audios") ? (
                     <ResourceSinglePicker
                         label="参考音频"
                         value={cloneAudioNodeId}
@@ -124,6 +125,7 @@ function validCloneAudioNodeId(value: string | undefined, options: CanvasVideoRe
 function audioSettingsSummary(config: AiConfig, cloneAudioNodeId: string, audioOptions: CanvasVideoResourceOption[]) {
     const model = config.model || config.audioModel || "";
     if (isGeminiTtsModel(model) && isGeminiConfig(config, model)) return normalizeGeminiTtsVoice(config.geminiTtsVoice);
+    if (runningHubModelInfo(model)) return normalizeRunningHubVoice(model, config.audioVoice) || runningHubModelInfo(model)?.label || "RunningHub";
     if (isGlmTtsModel(model)) return `${glmTtsVoiceLabel(config.glmTtsVoice)} · ${normalizeGlmTtsFormat(config.glmTtsFormat).toUpperCase()} · ${normalizeGlmTtsSpeed(config.glmTtsSpeed)}x`;
     if (!isMimoTtsModel(model)) return `${audioVoiceLabel(config.audioVoice)} · ${audioFormatLabel(config.audioFormat)} · ${audioSpeedLabel(config.audioSpeed)}`;
     const format = normalizeMimoTtsFormat(config.mimoTtsFormat).toUpperCase();

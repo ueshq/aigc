@@ -5,7 +5,8 @@ import axios from "axios";
 
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isMiniMaxH3BaseModel, isMiniMaxH3Config, miniMaxVideoInputError, miniMaxMediaLimits, miniMaxMediaFormats, MINIMAX_CONTEXT_IR_MODEL, MINIMAX_REGENERATION_MODEL, MINIMAX_REQUEST_MAX_BYTES } from "@/lib/minimax-video";
-import { isRunningHubConfig, runningHubVideoInputError } from "@/lib/runninghub";
+import { isRunningHubConfig, runningHubParamsError, runningHubParamValues, runningHubVideoInputError, RUNNINGHUB_PROMPT_OPTIMIZER } from "@/lib/runninghub";
+import { requestRunningHubText, runningHubChatPart, type RunningHubChatPart } from "./runninghub";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, videoDurationRule, videoReferenceMode, normalizeVideoSizeValue, normalizeVideoResolutionValue, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
@@ -119,6 +120,7 @@ export function isVideoPollDue(config: AiConfig, model: string, lastPolledAt?: n
 export async function optimizeMiniMaxPrompt(config: AiConfig, prompt: string, references: VideoReferenceInput = {}) {
     config = normalizeVideoConfig(config, videoReferenceMode(references));
     const model = config.model || config.videoModel;
+    if (isRunningHubConfig(config, model)) return optimizeRunningHubPrompt(config, prompt, normalizeVideoReferenceInput(references));
     if (!isMiniMaxH3Config(config, model) || !isMiniMaxH3BaseModel(model)) throw new VideoRequestError("仅 MiniMax 官方渠道的 MiniMax-H3 支持 AI 优化提示词");
     try {
         const accountProxy = usesAccountProxy(config);
@@ -140,6 +142,35 @@ export async function optimizeMiniMaxPrompt(config: AiConfig, prompt: string, re
     }
 }
 
+/** Enhances a RunningHub hailuo H3 prompt with the Context-IR text family, sending frames and references as chat parts. */
+async function optimizeRunningHubPrompt(config: AiConfig, prompt: string, input: Required<VideoReferenceInput>) {
+    const part = async (type: Parameters<typeof runningHubChatPart>[0], value: Promise<string | File>) => {
+        const reference = await value;
+        return runningHubChatPart(type, typeof reference === "string" ? reference : await readFileAsDataUrl(reference));
+    };
+    const parts: RunningHubChatPart[] = [
+        { type: "text", text: prompt },
+        ...(await Promise.all([
+            ...(input.firstFrame ? [part("first_frame_url", imageReferenceToFormValue(input.firstFrame))] : []),
+            ...(input.lastFrame ? [part("last_frame_url", imageReferenceToFormValue(input.lastFrame))] : []),
+            ...input.references.map((image) => part("image_url", imageReferenceToFormValue(image))),
+            ...input.videoReferences.map((video) => part("video_url", mediaReferenceToFormValue(video))),
+            ...input.audioReferences.map((audio) => part("audio_url", mediaReferenceToFormValue(audio))),
+        ])),
+    ];
+    try {
+        return await requestRunningHubText(config, RUNNINGHUB_PROMPT_OPTIMIZER, parts, { duration: config.videoSeconds, ratio: config.size });
+    } catch (error) {
+        throw new VideoRequestError(error instanceof Error ? error.message : "提示词优化失败");
+    }
+}
+
+/** Keeps the result file extension (e.g. .mov, .glb) when re-hosting a generated file. */
+function resultFileName(url: string, fallback: string) {
+    const name = decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "");
+    return /\.[a-z0-9]{2,5}$/i.test(name) ? name : fallback;
+}
+
 function videoSyncKey(config: AiConfig, task: VideoResponse) {
     const channelId = config.channelMode === "remote" ? channelIdForActiveModel(config) : localChannelForActiveModel(config)?.id;
     return `${config.channelMode}:${channelId || config.baseUrl}:${task.id}:${task.task_id || ""}:${task.video_id || ""}`;
@@ -151,7 +182,7 @@ async function syncGeneratedVideo(task: VideoResponse, config: AiConfig, content
     const media = await autoSyncToCloud(`video:${videoSyncKey(config, task)}`, async () => {
         const cached = contentResolved ? task : await cacheProtectedGeminiVideo(config, config.model || config.videoModel, task);
         if (cached.storageKey) return { url: cached.video_url || cached.url || url, storageKey: cached.storageKey };
-        return url ? uploadRemoteMediaToServer(url, "video") : null;
+        return url ? uploadRemoteMediaToServer(url, resultFileName(url, "video")) : null;
     });
     return media ? { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey } : task;
 }
@@ -198,7 +229,7 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
     if (input.baseVideo && !(isMiniMaxH3Config(config, model) && isMiniMaxH3BaseModel(model))) throw new VideoRequestError("仅 MiniMax 官方渠道的 MiniMax-H3 支持 2K 重生成");
-    const runningHubError = isRunningHubConfig(config, model) ? runningHubVideoInputError(model, input) : "";
+    const runningHubError = isRunningHubConfig(config, model) ? runningHubVideoInputError(model, input) || runningHubParamsError(model, runningHubParamValues(config.runningHubParams, model), videoReferenceMode(input)) : "";
     if (runningHubError) throw new VideoRequestError(runningHubError);
     if (isArkVideoConfig(config, model)) return createArkSeedanceVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSizeValue(config.size);
@@ -235,8 +266,11 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     if (!isGeminiOmniFlashVideoModel(model)) {
         body.append("seconds", config.videoSeconds);
     }
-    if (isRunningHubConfig(config, model)) body.append("size", config.size);
-    else if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
+    if (isRunningHubConfig(config, model)) {
+        body.append("size", config.size);
+        body.append("extra_params", JSON.stringify(runningHubParamValues(config.runningHubParams, model)));
+        if (input.audioReferences[0]?.durationMs) body.append("audio_duration_ms", String(Math.round(input.audioReferences[0].durationMs)));
+    } else if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
     else if (size !== "auto") body.append("size", size);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");

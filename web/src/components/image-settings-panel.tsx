@@ -5,6 +5,8 @@ import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
+import { isRunningHubConfig } from "@/lib/runninghub";
+import { RunningHubParamsPanel } from "@/components/runninghub-params-panel";
 
 const qualityOptions = [
     { value: "auto", label: "自动" },
@@ -40,7 +42,7 @@ export const imageSizeOptions = aspectOptions.map((item) => ({
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "size" | "count" | "runningHubParams", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     showSize?: boolean;
@@ -143,6 +145,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 ) : null}
+                {isRunningHubConfig(config, config.model) ? <RunningHubParamsPanel model={config.model} value={config.runningHubParams} onChange={(value) => onConfigChange("runningHubParams", value)} theme={theme} /> : null}
             </div>
         </ImageSettingsTheme>
     );

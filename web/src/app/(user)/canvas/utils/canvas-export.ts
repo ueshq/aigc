@@ -47,5 +47,8 @@ function fileExtension(mimeType: string, storageKey: string) {
     if (mimeType.includes("gif")) return "gif";
     if (mimeType.includes("mp4")) return "mp4";
     if (mimeType.includes("webm")) return "webm";
+    if (mimeType.includes("quicktime")) return "mov";
+    if (mimeType.includes("gltf-binary")) return "glb";
+    if (mimeType.includes("gltf+json")) return "gltf";
     return storageKey.startsWith("image:") ? "png" : "bin";
 }

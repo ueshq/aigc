@@ -27,6 +27,7 @@ export type AiConfig = {
     videoModel: string;
     textModel: string;
     audioModel: string;
+    model3dModel: string;
     audioVoice: string;
     audioFormat: string;
     audioSpeed: string;
@@ -48,6 +49,7 @@ export type AiConfig = {
     videoModels: string[];
     textModels: string[];
     audioModels: string[];
+    model3dModels: string[];
     quality: string;
     size: string;
     videoSize: string;
@@ -75,10 +77,15 @@ export type AiConfig = {
     videoChannelId: string;
     textChannelId: string;
     audioChannelId: string;
+    model3dChannelId: string;
+    /** JSON of RunningHub advanced parameters, bucketed by model family. */
+    runningHubParams: string;
+    /** JSON list of RunningHub custom voices created by voice clone or voice design. */
+    runningHubVoices: string;
 };
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
-export type ModelCapability = "image" | "video" | "text" | "audio";
+export type ModelCapability = "image" | "video" | "text" | "audio" | "model3d";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -89,6 +96,7 @@ export const defaultConfig: AiConfig = {
     videoModel: "grok-imagine-video",
     textModel: "gpt-5.5",
     audioModel: "gpt-4o-mini-tts",
+    model3dModel: "hunyuan3d-v3.1/model3d",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -110,6 +118,7 @@ export const defaultConfig: AiConfig = {
     videoModels: [],
     textModels: [],
     audioModels: [],
+    model3dModels: [],
     quality: "auto",
     size: "1:1",
     videoSize: "1280x720",
@@ -137,6 +146,9 @@ export const defaultConfig: AiConfig = {
     videoChannelId: "",
     textChannelId: "",
     audioChannelId: "",
+    model3dChannelId: "",
+    runningHubParams: "{}",
+    runningHubVoices: "[]",
 };
 
 type ConfigStore = {
@@ -171,11 +183,13 @@ export function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPubl
     const imageModels = filterChannelModelsByCapability(modelChannel.channels, "image", models);
     const videoModels = filterChannelModelsByCapability(modelChannel.channels, "video", models);
     const audioModels = filterChannelModelsByCapability(modelChannel.channels, "audio", models);
+    const model3dModels = filterChannelModelsByCapability(modelChannel.channels, "model3d", models);
     const fallbackTextModel = validDefault(modelChannel.defaultTextModel, textModels) || preferredModel(textModels, isTextModelName) || textModels[0] || "";
     const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
     const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);
     const fallbackVideoModel = validDefault(modelChannel.defaultVideoModel, videoModels) || preferredModel(videoModels, isVideoModelName);
     const fallbackAudioModel = preferredModel(audioModels, isAudioModelName);
+    const fallbackModel3dModel = validDefault(modelChannel.defaultModel3dModel, model3dModels) || model3dModels[0] || "";
     return {
         ...config,
         channelMode,
@@ -184,11 +198,13 @@ export function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPubl
         videoModels,
         textModels,
         audioModels,
+        model3dModels,
         model: textModels.includes(config.model) ? config.model : fallbackModel,
         imageModel: imageModels.includes(config.imageModel) ? config.imageModel : fallbackImageModel,
         videoModel: videoModels.includes(config.videoModel) ? config.videoModel : fallbackVideoModel,
         textModel: textModels.includes(config.textModel) ? config.textModel : fallbackTextModel || fallbackModel,
         audioModel: audioModels.includes(config.audioModel) ? config.audioModel : fallbackAudioModel,
+        model3dModel: model3dModels.includes(config.model3dModel) ? config.model3dModel : fallbackModel3dModel,
         systemPrompt: modelChannel.systemPrompt,
         publicChannels: modelChannel.channels || [],
     };
@@ -202,9 +218,13 @@ function preferredModel(models: string[], predicate: (model: string) => boolean)
     return models.find(predicate) || "";
 }
 
-/** RunningHub family names end with their capability, e.g. kling-v3.0-pro/video, minimax/speech-2.6-hd/tts or suno-v5/single/music. */
+/** RunningHub family names end with their capability, e.g. kling-v3.0-pro/video, suno-v5/single/music or meshy6/model3d. */
 function modelKindSuffix(model: string) {
-    return /\/(video|image|tts|music)$/.exec(model.trim().toLowerCase())?.[1];
+    return /\/(video|image|tts|music|text|model3d)$/.exec(model.trim().toLowerCase())?.[1];
+}
+
+function isModel3dModelName(model: string) {
+    return modelKindSuffix(model) === "model3d";
 }
 
 function isVideoModelName(model: string) {
@@ -301,7 +321,7 @@ function isAudioModelName(model: string) {
 }
 
 function isTextModelName(model: string) {
-    return !isImageModelName(model) && !isVideoModelName(model) && !isAudioModelName(model);
+    return !isImageModelName(model) && !isVideoModelName(model) && !isAudioModelName(model) && !isModel3dModelName(model);
 }
 
 export function modelMatchesCapability(model: string, capability?: ModelCapability, protocol = "") {
@@ -311,11 +331,13 @@ export function modelMatchesCapability(model: string, capability?: ModelCapabili
         const video = /^models\/veo-|^veo-/.test(value);
         const audio = value.includes("tts");
         const image = !video && !audio && value.includes("image");
+        if (capability === "model3d") return false;
         if (capability === "video") return video;
         if (capability === "audio") return audio;
         if (capability === "image") return image;
         return !video && !audio && !image;
     }
+    if (capability === "model3d") return isModel3dModelName(model);
     if (capability === "image") return isImageModelName(model);
     if (capability === "video") return isVideoModelName(model);
     if (capability === "audio") return isAudioModelName(model);
@@ -338,8 +360,8 @@ export function selectableModelsByCapability(config: AiConfig, capability?: Mode
 }
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
-    const configuredModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
-    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
+    const configuredModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : capability === "model3d" ? config.model3dModel : config.textModel;
+    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : capability === "model3d" ? defaultConfig.model3dModel : defaultConfig.textModel;
     const selectableModels = selectableModelsByCapability(config, capability);
     const matches = (model: string | undefined) => Boolean(model && (selectableModels.length ? selectableModels.includes(model) : modelMatchesCapability(model, capability)));
     if (matches(currentModel)) return currentModel!;
@@ -403,6 +425,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoChannelId: config.videoChannelId || localChannels[0]?.id || "",
                         textChannelId: config.textChannelId || localChannels[0]?.id || "",
                         audioChannelId: config.audioChannelId || localChannels[0]?.id || "",
+                        model3dChannelId: config.model3dChannelId || localChannels[0]?.id || "",
                         activeChannelId: config.activeChannelId || "",
                         syncStorageConfig: config.syncStorageConfig === true,
                         syncWebDAVStorageConfig: config.syncWebDAVStorageConfig === true,
@@ -411,6 +434,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoModel: config.videoModel || "grok-imagine-video",
                         textModel: config.textModel || config.model,
                         audioModel: config.audioModel || defaultConfig.audioModel,
+                        model3dModel: config.model3dModel || defaultConfig.model3dModel,
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
@@ -429,6 +453,9 @@ export const useConfigStore = create<ConfigStore>()(
                         videoModels: filterChannelModelsByCapability(localChannels, "video"),
                         textModels: filterChannelModelsByCapability(localChannels, "text"),
                         audioModels: filterChannelModelsByCapability(localChannels, "audio"),
+                        model3dModels: filterChannelModelsByCapability(localChannels, "model3d"),
+                        runningHubParams: config.runningHubParams || "{}",
+                        runningHubVoices: config.runningHubVoices || "[]",
                     },
                 };
             },
@@ -496,7 +523,7 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
 
 export function channelIdForActiveModel(config: AiConfig) {
     const channels = config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config);
-    const selectedChannelId = config.model === config.imageModel ? config.imageChannelId : config.model === config.videoModel ? config.videoChannelId : config.model === config.audioModel ? config.audioChannelId : config.model === config.textModel ? config.textChannelId : "";
+    const selectedChannelId = config.model === config.imageModel ? config.imageChannelId : config.model === config.videoModel ? config.videoChannelId : config.model === config.audioModel ? config.audioChannelId : config.model === config.model3dModel ? config.model3dChannelId : config.model === config.textModel ? config.textChannelId : "";
     const selectedChannel = channels.find((channel) => channel.id === selectedChannelId);
     if (selectedChannel?.protocol === "gemini") return selectedChannelId;
     if (!selectedChannel) {
@@ -506,6 +533,7 @@ export function channelIdForActiveModel(config: AiConfig) {
     if (modelMatchesCapability(config.model, "image") && config.imageChannelId) return config.imageChannelId;
     if (modelMatchesCapability(config.model, "video") && config.videoChannelId) return config.videoChannelId;
     if (modelMatchesCapability(config.model, "audio") && config.audioChannelId) return config.audioChannelId;
+    if (modelMatchesCapability(config.model, "model3d") && config.model3dChannelId) return config.model3dChannelId;
     if (modelMatchesCapability(config.model, "text") && config.textChannelId) return config.textChannelId;
     if (config.activeChannelId) return config.activeChannelId;
     if (config.model === config.videoModel) return config.videoChannelId;

@@ -9,6 +9,7 @@ import { type CanvasTheme } from "@/lib/canvas-theme";
 import { isSeedance20Model, normalizeVideoConfig, normalizeVideoSizeValue, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { isMiniMaxH3Config, miniMaxVideoCapabilities, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
 import { isRunningHubConfig } from "@/lib/runninghub";
+import { RunningHubParamsPanel } from "@/components/runninghub-params-panel";
 import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-store";
 
 export const videoResolutionOptions = [
@@ -34,7 +35,7 @@ const secondOptions = [6, 10, 12, 16, 20];
 type VideoSettingsPanelProps = {
     config: AiConfig;
     modelName?: string;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "runningHubParams", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -152,6 +153,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                             </div>
                         </SettingGroup>
                         {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
+                        {isRunningHubConfig(config, model) ? <RunningHubParamsPanel model={model} mode={referenceMode} value={config.runningHubParams} onChange={(value) => onConfigChange("runningHubParams", value)} theme={theme} /> : null}
                     </>
                 ) : null}
             </div>

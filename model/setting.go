@@ -5,8 +5,8 @@ import "encoding/json"
 type SettingKey string
 
 const (
-	SettingKeyPublic  SettingKey = "public"
-	SettingKeyPrivate SettingKey = "private"
+	SettingKeyPublic                 SettingKey = "public"
+	SettingKeyPrivate                SettingKey = "private"
 	SettingKeyAgentSkillsInitialized SettingKey = "agent-skills-initialized"
 
 	StorageProviderTypeS3     = "s3"
@@ -43,6 +43,7 @@ type PublicModelChannelSetting struct {
 	DefaultImageModel      string                   `json:"defaultImageModel"`
 	DefaultVideoModel      string                   `json:"defaultVideoModel"`
 	DefaultTextModel       string                   `json:"defaultTextModel"`
+	DefaultModel3dModel    string                   `json:"defaultModel3dModel"`
 	SystemPrompt           string                   `json:"systemPrompt"`
 	SystemPrompts          SystemPromptSetting      `json:"systemPrompts"`
 	AllowCustomChannel     *bool                    `json:"allowCustomChannel"`

@@ -27,6 +27,7 @@ export const CANVAS_AGENT_ACTION_NAMES = [
     "edit_image",
     "generate_video",
     "generate_audio",
+    "generate_model3d",
     "get_media_task_status",
 ] as const;
 
@@ -176,7 +177,13 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
         { prompt: STRING, title: STRING, sourceNodeIds: STRING_ARRAY, voice: STRING, instructions: STRING },
         ["prompt", "sourceNodeIds"],
     ),
-    defineTool("get_media_task_status", "读取图片、视频或音频节点的生成状态。", { nodeId: STRING }, ["nodeId"]),
+    defineTool(
+        "generate_model3d",
+        "创建 3D 模型节点和来源连线，并按 Agent 自动生成设置决定是否提交现有 3D 任务链路。sourceNodeIds 放作为视角参考的图片节点（第一张为正面），只有文字描述时传空数组。",
+        { prompt: STRING, title: STRING, sourceNodeIds: STRING_ARRAY },
+        ["prompt", "sourceNodeIds"],
+    ),
+    defineTool("get_media_task_status", "读取图片、视频、音频或 3D 模型节点的生成状态。", { nodeId: STRING }, ["nodeId"]),
 ];
 
 export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = nanoid()): CanvasAgentAction {
@@ -318,6 +325,15 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
             };
             break;
         }
+        case "generate_model3d": {
+            const sourceNodeIds = optionalStringArray(input.sourceNodeIds, "sourceNodeIds");
+            normalized = {
+                prompt: requiredString(input.prompt, "prompt"),
+                ...(sourceNodeIds ? { sourceNodeIds } : {}),
+                ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
+            };
+            break;
+        }
     }
 
     return { id, name: actionName, arguments: normalized };
@@ -403,13 +419,14 @@ export function canvasAgentActionLabel(action: CanvasAgentAction) {
         edit_image: "正在创建图片编辑节点",
         generate_video: "正在创建视频节点",
         generate_audio: "正在创建音频节点",
+        generate_model3d: "正在创建 3D 模型节点",
         get_media_task_status: "正在读取媒体任务",
     };
     return labels[action.name];
 }
 
 export function isCanvasAgentMediaAction(action: CanvasAgentAction) {
-    return action.name === "generate_image" || action.name === "edit_image" || action.name === "generate_video" || action.name === "generate_audio";
+    return action.name === "generate_image" || action.name === "edit_image" || action.name === "generate_video" || action.name === "generate_audio" || action.name === "generate_model3d";
 }
 
 export function userLikelyRequestedCanvasAction(text: string) {

@@ -131,8 +131,9 @@ sourceNodeIds 同时承担两件事：
 - edit_image：至少需要一个已有内容的真实图片节点，用于编辑、变体和身份保持。
 - generate_video：文生视频、图生视频以及当前模型真实支持的视频/音频参考能力。
 - generate_audio：创建独立 audio 节点；prompt 是实际朗读文字，instructions 是音色与演绎说明。
+- generate_model3d：创建 model3d 节点；prompt 描述模型外观，sourceNodeIds 放作为视角参考的图片节点（第一张为正面）。仅在全局配置了 3D 模型时使用。
 
-当前真实节点类型只有 image、panorama、text、config、video、audio、director、group。节点创建和修改严格使用当前工具字段，不发明节点类型或任意 metadata patch。
+当前真实节点类型只有 image、panorama、text、config、video、audio、model3d、director、group。节点创建和修改严格使用当前工具字段，不发明节点类型或任意 metadata patch。
 
 ## 7. 工具调用协议
 

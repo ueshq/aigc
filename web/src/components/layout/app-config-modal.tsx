@@ -21,8 +21,8 @@ import { useUserStore } from "@/stores/use-user-store";
 
 type ModelGroup = {
     capability: ModelCapability;
-    modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel";
-    channelKey: "imageChannelId" | "videoChannelId" | "textChannelId" | "audioChannelId";
+    modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel" | "model3dModel";
+    channelKey: "imageChannelId" | "videoChannelId" | "textChannelId" | "audioChannelId" | "model3dChannelId";
     label: string;
 };
 type ConfigSection = ModelCapability | "general" | "storage";
@@ -33,6 +33,7 @@ const modelGroups: ModelGroup[] = [
     { capability: "video", modelKey: "videoModel", channelKey: "videoChannelId", label: "视频" },
     { capability: "audio", modelKey: "audioModel", channelKey: "audioChannelId", label: "音频" },
     { capability: "text", modelKey: "textModel", channelKey: "textChannelId", label: "文本" },
+    { capability: "model3d", modelKey: "model3dModel", channelKey: "model3dChannelId", label: "3D" },
 ];
 const sectionOptions = [...modelGroups.map((group) => ({ value: group.capability, label: group.label + "模型" })), { value: "general", label: "通用偏好" }, { value: "storage", label: "存储设置" }];
 const secondaryText = "text-xs text-[var(--ant-color-text-secondary)]";
@@ -367,7 +368,7 @@ export function AppConfigModal() {
                                     </div>
                                 ))}
                                 <div className="mt-4 border-t border-[var(--ant-color-border-secondary)] pt-3">
-                                    {sectionOptions.slice(4).map((item) => <button key={item.value} type="button" disabled={savingConfig} aria-current={section === item.value ? "page" : undefined} className={navigationItem + (section === item.value ? " bg-[var(--ant-color-fill-secondary)]" : "")} onClick={() => setSection(item.value as ConfigSection)}>{item.label}</button>)}
+                                    {sectionOptions.slice(modelGroups.length).map((item) => <button key={item.value} type="button" disabled={savingConfig} aria-current={section === item.value ? "page" : undefined} className={navigationItem + (section === item.value ? " bg-[var(--ant-color-fill-secondary)]" : "")} onClick={() => setSection(item.value as ConfigSection)}>{item.label}</button>)}
                                 </div>
                             </nav>
                             <div className="flex shrink-0 flex-col gap-2 md:hidden">
@@ -548,6 +549,7 @@ function configWithChannels(config: AiConfig, channels = normalizeLocalChannels(
         videoModels: filterChannelModelsByCapability(channels, "video"),
         audioModels: filterChannelModelsByCapability(channels, "audio"),
         textModels: filterChannelModelsByCapability(channels, "text"),
+        model3dModels: filterChannelModelsByCapability(channels, "model3d"),
         baseUrl: channels[0]?.baseUrl || "",
         apiKey: channels[0]?.apiKey || "",
     };

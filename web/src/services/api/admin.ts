@@ -200,6 +200,7 @@ export type AdminPublicModelChannelSettings = {
     defaultImageModel: string;
     defaultVideoModel: string;
     defaultTextModel: string;
+    defaultModel3dModel: string;
     systemPrompt: string;
     systemPrompts: {
         image: string;

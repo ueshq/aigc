@@ -18,7 +18,7 @@ import { isFailedTask, usesAccountProxy } from "@/services/api/ai-request";
 import { VideoSettingsPanel, videoResolutionLabel, videoResolutionOptions, videoSizeForResolution, videoSizeOptions } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { isRunningHubConfig, runningHubVideoInputError } from "@/lib/runninghub";
+import { isRunningHubConfig, runningHubPromptOptional, runningHubVideoInputError, RUNNINGHUB_PROMPT_OPTIMIZE_MODEL } from "@/lib/runninghub";
 import { isMiniMaxH3BaseModel, isMiniMaxH3Config, MINIMAX_REGENERATION_MODEL, miniMaxVideoCapabilities, miniMaxVideoInputError, miniMaxRatioOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3Ratio } from "@/lib/minimax-video";
 import { ARK_SEEDANCE_REFERENCE_LIMITS, boolConfig, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { modelKey, normalizeVideoConfig, normalizeVideoResolutionValue, videoDurationRule, videoParameterOptions, videoReferenceMode, isAgnesVideoV25Model, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
@@ -156,7 +156,7 @@ export default function VideoPage() {
     }, [effectiveConfig.videoSize, effectiveConfig.vquality, effectiveConfig.videoSeconds, effectiveConfig.videoGenerateAudio, videoConfig.size, videoConfig.vquality, videoConfig.videoSeconds, videoConfig.videoGenerateAudio, updateConfig]);
     const effectiveConfigRef = useRef(videoConfig);
     const model = effectiveConfig.videoModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
+    const canGenerate = Boolean(prompt.trim()) || runningHubPromptOptional(videoConfig, model);
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const referenceLimits = seedanceReferenceLimits(videoConfig, model);
     const referenceImageLimit = referenceLimits.images;
@@ -471,7 +471,7 @@ export default function VideoPage() {
 
     const buildRequestSnapshot = ({ promptText = prompt, referenceItems = references, firstFrameItem = firstFrame, lastFrameItem = lastFrame, videoReferenceItems = videoReferences, audioReferenceItems = audioReferences, taskCountValue = taskCount, configValue = videoConfig, modelValue = model }: { promptText?: string; referenceItems?: ReferenceImage[]; firstFrameItem?: ReferenceImage | null; lastFrameItem?: ReferenceImage | null; videoReferenceItems?: ReferenceVideo[]; audioReferenceItems?: ReferenceAudio[]; taskCountValue?: number; configValue?: AiConfig; modelValue?: string } = {}) => {
         const text = promptText.trim();
-        if (!text) {
+        if (!text && !runningHubPromptOptional(configValue, modelValue)) {
             message.error("请输入视频提示词");
             return null;
         }
@@ -1165,7 +1165,7 @@ function WorkbenchPanel({
     const audioGenerationEnabled = !isMiniMaxH3Config(config, model) && supportsVideoAudioGeneration(model, channelProtocolForConfig({ ...config, model, videoModel: model }));
     const generateAudio = boolConfig(config.videoGenerateAudio, false);
     const miniMax = isMiniMaxH3Config(config, model) ? miniMaxVideoCapabilities(model) : null;
-    const canOptimizePrompt = Boolean(miniMax) && isMiniMaxH3BaseModel(model);
+    const canOptimizePrompt = (Boolean(miniMax) && isMiniMaxH3BaseModel(model)) || (model === RUNNINGHUB_PROMPT_OPTIMIZE_MODEL && isRunningHubConfig(config, model));
     const bottomSettingsGridClass = audioGenerationEnabled ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.7fr_auto_auto]";
 
     if (layout === "bottom") {

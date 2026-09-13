@@ -4,13 +4,15 @@ import { buildGenerationConfig, videoConfigPatch } from "./canvas-node-generatio
 
 import { useEffect, useState } from "react";
 import { ArrowUp, BookOpen, LoaderCircle, Maximize2, WandSparkles } from "lucide-react";
-import { App, Button, Modal, Tooltip } from "antd";
+import { App, Button, Modal, Segmented, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isMiniMaxH3BaseModel, isMiniMaxH3Config } from "@/lib/minimax-video";
+import { isRunningHubConfig, runningHubPromptOptional, RUNNINGHUB_PROMPT_OPTIMIZE_MODEL } from "@/lib/runninghub";
+import { CanvasRunningHubParamsPopover } from "./canvas-runninghub-params-popover";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasCameraControl } from "./canvas-camera-control";
@@ -44,7 +46,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const mode = defaultMode(node.type);
+    const mode = defaultMode(node.type, node.metadata?.generationMode);
     const config = buildGenerationConfig(globalConfig, node, mode);
     const isPanorama = isPanoramaNodeType(node.type);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
@@ -66,7 +68,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onPromptChange(node.id, value);
     };
 
-    const canSubmit = Boolean(prompt.trim()) || (isPanorama && (hasImageContent || mentionReferences.length > 0));
+    const canSubmit = Boolean(prompt.trim()) || (isPanorama && (hasImageContent || mentionReferences.length > 0)) || runningHubPromptOptional(config, config.model);
 
     const submit = () => {
         const text = prompt.trim();
@@ -75,7 +77,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!isPanorama) setPrompt("");
     };
 
-    const canOptimizePrompt = mode === "video" && Boolean(onOptimizePrompt) && isMiniMaxH3BaseModel(config.model) && isMiniMaxH3Config(config, config.model);
+    const canOptimizePrompt = mode === "video" && Boolean(onOptimizePrompt) && ((isMiniMaxH3BaseModel(config.model) && isMiniMaxH3Config(config, config.model)) || (config.model === RUNNINGHUB_PROMPT_OPTIMIZE_MODEL && isRunningHubConfig(config, config.model)));
+    const canSwitchTo3d = isCanvasImageNodeType(node.type) && !isPanorama;
     const optimizePrompt = async () => {
         if (!onOptimizePrompt || !prompt.trim() || optimizingPrompt) return;
         setOptimizingPrompt(true);
@@ -123,7 +126,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </Tooltip>
                     ) : null}
                     <PromptSelectDialog open={promptLibraryOpen} onOpenChange={setPromptLibraryOpen} onSelect={updatePrompt} />
-                    {mode === "image" ? (
+                    {canSwitchTo3d ? <Segmented size="small" className="shrink-0" value={mode} options={[{ value: "image", label: "图片" }, { value: "model3d", label: "3D" }]} onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode, ...(/\/model3d$/.test(node.metadata?.model || "") ? { model: undefined, channelId: undefined } : {}) })} /> : null}
+                    {mode === "model3d" ? (
+                        <>
+                            <ModelPicker className="!w-[180px] !min-w-0 !shrink-0" config={config} value={config.model} channelId={config.model3dChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="model3d" onMissingConfig={() => openConfigDialog(true)} />
+                            <CanvasRunningHubParamsPopover config={config} buttonClassName="!h-10 !shrink-0 !rounded-full !px-3" onChange={(runningHubParams) => onConfigChange(node.id, { runningHubParams })} />
+                        </>
+                    ) : mode === "image" ? (
                         <>
                             <ModelPicker className="!w-[180px] !min-w-0 !shrink-0" config={config} value={config.model} channelId={config.imageChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
@@ -186,12 +195,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     );
 }
 
-function defaultMode(type: CanvasNodeData["type"]): CanvasGenerationMode {
+function defaultMode(type: CanvasNodeData["type"], generationMode?: CanvasGenerationMode): CanvasGenerationMode {
+    if (type === CanvasNodeType.Model3D || (type === CanvasNodeType.Image && generationMode === "model3d")) return "model3d";
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
 
 function promptPlaceholder(mode: CanvasGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
     if (mode === "video") return "描述要生成的视频内容";
+    if (mode === "model3d") return hasImageContent ? "描述要生成的 3D 模型，可留空直接用图片生成" : "描述要生成的 3D 模型";
     if (mode === "audio") return "描述要生成的音频内容";
     if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容";
     return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";

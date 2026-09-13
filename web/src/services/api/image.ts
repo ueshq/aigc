@@ -4,7 +4,7 @@ import axios from "axios";
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
-import { runningHubModels } from "@/lib/runninghub";
+import { runningHubModels, runningHubParamsError, runningHubParamValues } from "@/lib/runninghub";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiErrorMessage, isGeminiConfig, normalizeGeminiBaseUrl } from "@/lib/gemini";
 import { autoSyncImage, imageToDataUrl, resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
@@ -14,7 +14,7 @@ import { nanoid } from "nanoid";
 
 export type ChatCompletionMessage = {
     role: "system" | "user" | "assistant";
-    content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+    content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } } | { type: "video_url"; video_url: { url: string } } | { type: "audio_url"; audio_url: { url: string } }>;
 };
 
 type ImageApiResponse = {
@@ -166,9 +166,12 @@ function createImageRequestParams(config: AiConfig): ImageRequestParams {
     };
 }
 
-/** RunningHub image tasks only map the Images API, one image per request, without streaming. */
-function runningHubImageConfig<T extends AiConfig>(config: T): T {
-    return channelProtocolForConfig(config) === "runninghub" ? { ...config, apiMode: "images", streamImages: false, codexCli: false } : config;
+/** RunningHub image tasks only map the Images API, one image per request, without streaming; required advanced parameters are checked first. */
+function runningHubImageConfig<T extends AiConfig>(config: T, references: ReferenceImage[]): T {
+    if (channelProtocolForConfig(config) !== "runninghub") return config;
+    const paramsError = runningHubParamsError(config.model, runningHubParamValues(config.runningHubParams, config.model), references.length ? "edit" : "text");
+    if (paramsError) throw new ImageRequestError(paramsError);
+    return { ...config, apiMode: "images", streamImages: false, codexCli: false };
 }
 
 function isZhipuImageModel(model: string) {
@@ -196,6 +199,7 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
 }
 
 function applyImageGenerationOptions(body: Record<string, unknown>, config: AiConfig, params: ImageRequestParams) {
+    if (channelProtocolForConfig(config) === "runninghub") body.extra_params = runningHubParamValues(config.runningHubParams, config.model);
     if (isZhipuImageModel(config.model)) return;
     if (params.n > 1) body.n = params.n;
     if (config.responseFormatB64Json) body.response_format = "b64_json";
@@ -563,6 +567,7 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     }
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => formData.append("image", file));
+    if (channelProtocolForConfig(config) === "runninghub") formData.set("extra_params", JSON.stringify(runningHubParamValues(config.runningHubParams, config.model)));
 
     return requestAndParseImages(
         () =>
@@ -684,7 +689,7 @@ async function requestChatImagesSingle(config: AiConfig, prompt: string, inputIm
 }
 
 async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[]): Promise<GeneratedImage[]> {
-    config = runningHubImageConfig(config);
+    config = runningHubImageConfig(config, references);
     assertImageReferencesSupported(config.model, references);
     const params = createImageRequestParams(config);
     const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
@@ -785,7 +790,7 @@ export async function pollCanvasImageTaskStatus(taskId: string): Promise<CanvasI
 }
 
 async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], params: ImageRequestParams, options: CanvasImageTaskOptions): Promise<RequestInit> {
-    config = runningHubImageConfig(config);
+    config = runningHubImageConfig(config, references);
     assertImageReferencesSupported(config.model, references);
     const taskChannelId = channelIdForActiveModel(config);
     const taskChannelHeader: Record<string, string> = config.channelMode === "remote" && taskChannelId ? { "X-Model-Channel-ID": taskChannelId } : {};
@@ -867,6 +872,8 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         if (params.size) formData.set("size", params.size);
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
         files.forEach((file) => formData.append("image", file));
+        if (channelProtocolForConfig(config) === "runninghub") formData.set("extra_params", JSON.stringify(runningHubParamValues(config.runningHubParams, config.model)));
+    if (channelProtocolForConfig(config) === "runninghub") formData.set("extra_params", JSON.stringify(runningHubParamValues(config.runningHubParams, config.model)));
         return { method: "POST", headers: tokenHeaders, body: formData };
     }
     if (isAgnesImageModel(config.model)) {
@@ -1080,7 +1087,7 @@ async function createGeminiTextBody(config: AiConfig, messages: ChatCompletionMe
         const parts: Array<Record<string, unknown>> = [];
         for (const part of typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content) {
             if (part.type === "text") parts.push({ text: part.text });
-            else parts.push(dataUrlToGeminiInlineData(await imageToDataUrl({ dataUrl: part.image_url.url, url: part.image_url.url })));
+            else if (part.type === "image_url") parts.push(dataUrlToGeminiInlineData(await imageToDataUrl({ dataUrl: part.image_url.url, url: part.image_url.url })));
         }
         contents.push({ role: message.role === "assistant" ? "model" : "user", parts });
     }

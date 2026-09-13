@@ -158,28 +158,37 @@ description: settings 表中 public 和 private 配置结构说明
 
 `runninghub` 默认地址为国际站 `https://www.runninghub.ai/openapi/v2`，国内站为 `https://www.runninghub.cn/openapi/v2`，只填域名时自动补全 `/openapi/v2`。使用 Bearer API Key，标准模型 API 需要企业共享 Key。仅支持登录后经后端代理调用，未登录的浏览器直连会提示先登录。
 
-模型列表是内置的端点家族，名称以能力结尾：`<家族>/video`、`<家族>/image`、`<家族>/tts`、`<家族>/music`，例如 `kling-v3.0-pro/video`、`seedream-v4.5/image`、`minimax/speech-2.6-hd/tts`、`suno-v5/single/music`。读取模型列表和渠道测试都不发起生成。家族内的具体端点由后端按本次输入自动选择：
+模型列表是内置的端点家族，名称以能力结尾：`/video`、`/image`、`/tts`、`/music`、`/text`、`/model3d`，例如 `kling-v3.0-pro/video`、`seedream-v4.5/image`、`minimax/speech-2.6-hd/tts`、`suno-v5/custom/music`、`rhart-text-g-25-flash/text`、`hitem3d-v15/model3d`。模型选择器显示可读名称，原始家族名作为副标题。读取模型列表和渠道测试都不发起生成。家族内的具体端点由后端按本次输入自动选择：
 
 | 能力 | 输入 | 端点 |
 | --- | --- | --- |
 | 视频 | 仅提示词 | `text-to-video`；家族没有该端点时使用素材可选的参考端点 |
 | 视频 | 首帧，或首帧加尾帧 | `image-to-video`、`start-end-to-video` 等；家族没有首尾帧端点时，首尾帧并入参考图 |
 | 视频 | 参考图、参考视频、参考音频 | `reference-to-video`、`multimodal-video` 等 |
+| 视频工具 | 参考视频，动作控制另需首帧 | 编辑、延长、动作控制、超分、补帧、去字幕、特效模板、视频翻译等，一个家族对应一个端点 |
+| 口型同步 | 参考视频，加参考音频或朗读文本 | `kling-lip-sync/video`，见下文 |
 | 图片 | 无参考图 / 有参考图 | `text-to-image` / `image-to-image`、`edit` |
-| 语音 | 文本 | 对应 TTS 端点 |
-| 视频工具 | 参考视频，动作控制另需首帧 | 编辑、延长、动作控制、超分、补帧、去字幕等，一个家族对应一个端点 |
 | 图片工具 | 参考图 | Topaz、HYPIR 放大等 |
-| 音乐 | 提示词，翻唱另需参考音频 | Suno、MiniMax 音乐 |
+| 语音 | 文本，音色克隆另需参考音频 | TTS 端点、`minimax/voice-clone/tts`、`minimax/voice-design/tts` |
+| 音乐 | 提示词，翻唱另需参考音频 | Suno、MiniMax 音乐、Mureka |
+| 文本 | 提示词，可附图片或视频 | 文本生成、图片理解、视频理解、歌词、提示词增强 |
+| 3D | 提示词，或一张到多张视角图 | `text-to-3d`、`image-to-3d`、`multi-image-to-3d` |
 
-- 视频沿用 `/api/v1/videos` 和后台任务轮询，查询改为 `POST /query`，约 5 秒一次。图片和语音由后端提交任务后等待完成，再返回 `data[].url` 或音频文件；等待上限为渠道超时，默认 600 秒。画布图片和音频任务同样适用。
+- 视频和 3D 沿用 `/api/v1/videos` 和后台任务轮询，查询改为 `POST /query`，约 5 秒一次。图片、语音、音乐和文本由后端提交任务后等待完成，再返回 `data[].url`、音频文件或 `chat.completion` JSON；等待上限为渠道超时，默认 600 秒。画布图片和音频任务同样适用。
 - 参数按端点 schema 映射：时长、分辨率、比例和尺寸取最接近的可选值，必填但未设置的参数使用 RunningHub 默认值，其余可选参数不发送。视频设置按当前输入模式展示该家族可用的清晰度、比例、时长和生成音频开关。
+- 高级参数：schema 中没有被自动映射的参数，如歌词、标题、风格标签、特效模板、翻译语言、面数，显示在图片、视频、音频设置和画布 3D 参数弹层的“高级参数”中。前端以 `extra_params` 发送，后端按类型转换，列表值必须命中可选项。数值按家族分别保存在个人配置，画布节点可单独覆盖。必填且没有默认值的参数未填写时，前端提交前提示，后端返回“请填写参数 X”。
 - 本地文件或 Base64 素材先上传到 `POST /media/upload/binary`，公网 URL 直接透传。家族内没有端点能接受当前素材数量或组合时直接报错。
+- 提示词：家族中有不需要提示词的端点时，如超分、去字幕、图生 3D，创作台和画布允许不填提示词提交。
 - 语音音色：有固定列表的模型提供下拉选择，其余模型填写 RunningHub 音色 ID，留空使用模型默认音色。
-- 纳入规则：端点要有提示词或素材输入，其余必填参数都有非文本默认值。口型、特效模板、翻译、3D、音色克隆与设计，以及输出文本的 Mureka、歌词类端点不接入。
-- 视频工具家族如 `rhart-video/video-upscaler/video`、`kling-video-o3-pro/video-edit/video`、`kling-v2.6-std/motion-control/video`，在视频创作台和画布中用参考视频驱动；创作台仍要求填写提示词，不需要提示词的工具会忽略它。
-- 音乐家族在画布音频节点使用；`minimax/music-cover/music` 需要连接一个 MP3 或 WAV 参考音频节点。歌词参数未接入，只发送提示词。
-- 真实接口验收：`RUNNINGHUB_LIVE=1 go test ./service -run TestRunningHubLive -v -count=1 -timeout 40m`，读取 `.env/runninghub.env`，每种能力只提交一个最低价请求；普通 `go test ./...` 会跳过。
-- 文本对话请另建 OpenAI 协议渠道，Base URL 选择预设“RunningHub LLM”，即 `https://llm.runninghub.ai/v1`。
+- 音色克隆与设计：`minimax/voice-clone/tts` 需要连接一个参考音频节点，`minimax/voice-design/tts` 用提示词描述音色，其余参数在高级参数中填写。音色 ID 留空时自动生成，提交任务时保存到个人配置；MiniMax 语音家族的音色设置中可点选或删除这些音色。
+- 音乐：`suno-v5/custom/music` 等家族在高级参数中填写歌词、标题和风格标签。歌词框旁的“AI 写歌词”用当前模型的渠道调用 `suno/lyrics/text`，把框内主题替换为生成的歌词。`minimax/music-cover/music` 需要连接一个 MP3 或 WAV 参考音频节点。
+- 文本：`/text` 家族出现在文本模型列表，经 `/api/v1/chat/completions` 代理。消息中的文本合并为提示词，`image_url`、`video_url`、`audio_url` 部件作为素材，结果以非流式 JSON 一次返回。画布文本节点会把连接的视频和音频一并发送。
+- 提示词优化：`minimax/hailuo-h3/video` 家族在创作台和画布显示“AI 优化”，调用 `minimax/hailuo-h3/context-ir/text`，并带上首尾帧、参考素材、时长与比例。
+- 3D：画布新增 3D 模型节点。可在图片节点提示面板切换到“3D”，也可从节点菜单、配置节点或 Agent 的 `generate_model3d` 工具创建。GLB 和 glTF 结果在节点内旋转预览，OBJ、FBX 等格式只提供下载。个人配置和后台“默认 3D 模型”按 `/model3d` 后缀归类。
+- 口型同步：`kling-lip-sync/video` 需要一个含清晰人脸的参考视频，分辨率需满足可灵要求（720p 或 1080p），并连接参考音频或填写朗读文本。后端先调用 `kling-lip-sync/identify-face` 识别人脸；只有文本时再用 `kling-lip-sync/tts` 合成配音，音色在高级参数中选择；最后提交 `lip-sync-video`，交给视频任务轮询。参考音频时长优先取自音频节点；可灵配音或缺少时长的音频由后端下载后按 MP3 或 WAV 测量，配音区间不超出识别到的人脸时段，无法测量时提示重新连接。
+- 不接入：`marble` 世界生成、Kling 主体与角色上传、Vidu 短剧、草稿增强、Mureka 文件上传、识曲、分轨与人声克隆、预处理与重生成类端点、已废弃与异步重复版本、`doubao-seed-audio`、图层分解。
+- 真实接口验收：`RUNNINGHUB_LIVE=1 go test ./service -run TestRunningHubLive -v -count=1 -timeout 40m`，读取 `.env/runninghub.env`，每种能力只提交一个最低价请求。`-run TestRunningHubLive/extended` 只跑文本、音乐参数、3D 和口型同步；音色克隆与设计不在验收中运行。普通 `go test ./...` 会跳过。
+- 通用对话 LLM 也可另建 OpenAI 协议渠道，Base URL 选择预设“RunningHub LLM”，即 `https://llm.runninghub.ai/v1`。
 
 模型目录由 `scripts/runninghub-registry.mjs` 从官方 [ComfyUI_RH_OpenAPI](https://github.com/HM-RunningHub/ComfyUI_RH_OpenAPI) 的 `models_registry.json` 生成 `service/runninghub_registry.json` 和 `web/src/lib/runninghub-models.ts`。官方新增模型后重新运行：
 

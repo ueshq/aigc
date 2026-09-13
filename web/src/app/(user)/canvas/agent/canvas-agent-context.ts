@@ -176,7 +176,7 @@ function summarizeNode(node: CanvasNodeData): CanvasAgentContextNode {
 }
 
 function mediaTaskId(node: CanvasNodeData) {
-    if (node.type === CanvasNodeType.Video) return node.metadata?.videoTaskId || "";
+    if (node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Model3D) return node.metadata?.videoTaskId || "";
     if (node.type === CanvasNodeType.Audio) return node.metadata?.audioTaskId || "";
     if (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Panorama) return node.metadata?.imageTaskId || "";
     return "";

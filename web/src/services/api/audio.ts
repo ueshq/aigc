@@ -5,10 +5,10 @@ import { nanoid } from "nanoid";
 
 import { audioMimeType, isGlmTtsModel, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
-import { isRunningHubConfig, normalizeRunningHubVoice } from "@/lib/runninghub";
+import { createRunningHubVoiceId, isRunningHubConfig, normalizeRunningHubVoice, parseRunningHubVoices, runningHubParamsError, runningHubParamValues, RUNNINGHUB_VOICE_CLONE_MODEL, RUNNINGHUB_VOICE_DESIGN_MODEL } from "@/lib/runninghub";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
 import { autoSyncToCloud } from "@/services/image-storage";
-import { localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { localChannelForActiveModel, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceAudio } from "@/types/media";
 
@@ -145,7 +145,13 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         return { model, ...buildGeminiTtsRequest(config, prompt) };
     }
     if (isRunningHubConfig(config, model)) {
-        return { model, input: prompt, voice: normalizeRunningHubVoice(model, config.audioVoice), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)), ...(referenceAudio ? { reference_audio: await referenceAudioDataUrl(referenceAudio) } : {}) };
+        const extraParams = { ...runningHubParamValues(config.runningHubParams, model) };
+        const voiceKey = model === RUNNINGHUB_VOICE_CLONE_MODEL ? "custom_voice_id" : model === RUNNINGHUB_VOICE_DESIGN_MODEL ? "voiceId" : "";
+        if (voiceKey) extraParams[voiceKey] = String(extraParams[voiceKey] || "").trim() || createRunningHubVoiceId();
+        const paramsError = runningHubParamsError(model, extraParams, referenceAudio ? "reference" : "text");
+        if (paramsError) throw new Error(paramsError);
+        if (voiceKey) rememberRunningHubVoice(String(extraParams[voiceKey]), model, prompt);
+        return { model, input: prompt, voice: normalizeRunningHubVoice(model, config.audioVoice), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)), extra_params: extraParams, ...(referenceAudio ? { reference_audio: await referenceAudioDataUrl(referenceAudio) } : {}) };
     }
     if (isGlmTtsModel(model)) {
         if (prompt.length > 1024) throw new Error("GLM-TTS 文本不能超过 1024 个字符");
@@ -179,6 +185,14 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
         ...(instructions ? { instructions } : {}),
     };
+}
+
+/** Saves a RunningHub custom voice when its clone or design task is submitted, so MiniMax speech families can use it; failed ones can be removed in the settings. */
+function rememberRunningHubVoice(id: string, model: string, prompt: string) {
+    const store = useConfigStore.getState();
+    const voices = parseRunningHubVoices(store.config.runningHubVoices).filter((voice) => voice.id !== id);
+    const name = `${model === RUNNINGHUB_VOICE_CLONE_MODEL ? "克隆" : "设计"} ${prompt.trim().slice(0, 8) || id.slice(-4)}`;
+    store.updateConfig("runningHubVoices", JSON.stringify([...voices, { id, name, model, createdAt: new Date().toISOString() }]));
 }
 
 function audioResponseFormat(config: AiConfig, model: string) {

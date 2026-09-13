@@ -248,7 +248,8 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 		}
 	}
 	w.WriteHeader(response.StatusCode)
-	responseBody := copyAIResponseBody(w, response.Body, !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "video/"))
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	responseBody := copyAIResponseBody(w, response.Body, !strings.HasPrefix(contentType, "video/") && !strings.HasPrefix(contentType, "model/") && !strings.HasPrefix(contentType, "application/octet-stream"))
 	saveAIProxyLog(logContext, response.StatusCode, responseBody, "")
 }
 

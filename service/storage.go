@@ -922,6 +922,12 @@ func extensionForContentType(contentType string) string {
 		return ".webp"
 	case "image/png":
 		return ".png"
+	case "video/quicktime":
+		return ".mov"
+	case "model/gltf-binary":
+		return ".glb"
+	case "model/gltf+json":
+		return ".gltf"
 	default:
 		return ".bin"
 	}

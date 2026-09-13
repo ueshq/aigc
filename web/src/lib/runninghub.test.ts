@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isRunningHubConfig, normalizeRunningHubVoice, runningHubModels, runningHubVideoCapabilities, runningHubVideoInputError } from "./runninghub";
+import { createRunningHubVoiceId, isRunningHubConfig, mergeRunningHubParams, normalizeRunningHubVoice, runningHubModelInfo, runningHubModels, runningHubParamsError, runningHubParamValues, runningHubPromptOptional, runningHubVideoCapabilities, runningHubVideoInputError, setRunningHubParamValues } from "./runninghub";
 import { normalizeVideoConfig, supportsVideoAudioGeneration, supportsVideoFrameReferences, videoDurationRule, videoParameterOptions } from "./video-model-capabilities";
 import { defaultConfig, modelMatchesCapability } from "../stores/use-config-store";
 
@@ -58,4 +58,39 @@ test("TTS voices stay valid for the selected model", () => {
     assert.equal(normalizeRunningHubVoice("minimax/speech-2.6-hd/tts", " Calm_Woman "), "Calm_Woman");
     assert.equal(normalizeRunningHubVoice("qwen3-tts-flash/tts", "Serena"), "Serena");
     assert.equal(normalizeRunningHubVoice("qwen3-tts-flash/tts", "unknown"), "Cherry");
+});
+
+test("text and 3D families get their own capabilities", () => {
+    assert.ok(modelMatchesCapability("rhart-text-g-25-flash/text", "text"));
+    assert.ok(!modelMatchesCapability("rhart-text-g-25-flash/text", "image"));
+    assert.ok(modelMatchesCapability("hitem3d-v15/model3d", "model3d"));
+    assert.ok(!modelMatchesCapability("hitem3d-v15/model3d", "text"));
+    assert.ok(!modelMatchesCapability("kling-v3.0-pro/video", "model3d"));
+    assert.ok(modelMatchesCapability("kling-lip-sync/video", "video"));
+    assert.equal(runningHubModelInfo("kling-lip-sync/video")?.label, "可灵对口型");
+});
+
+test("advanced parameters are stored per family and required ones are checked", () => {
+    const model = "suno-v5/custom/music";
+    const params = runningHubModelInfo(model)?.params || [];
+    assert.ok(params.some((param) => param.key === "title" && param.required) && params.some((param) => param.key === "tags" && param.required));
+    let store = setRunningHubParamValues("{}", model, { title: "Rain", tags: "" });
+    store = setRunningHubParamValues(store, "mureka-v9/generate-bgm/music", { n: 1 });
+    assert.deepEqual(runningHubParamValues(store, model), { title: "Rain" });
+    assert.deepEqual(runningHubParamValues(store, "mureka-v9/generate-bgm/music"), { n: 1 });
+    assert.match(runningHubParamsError(model, runningHubParamValues(store, model)), /^请在高级参数中填写「.+」$/);
+    assert.equal(runningHubParamsError(model, { title: "Rain", tags: "piano" }), "");
+    assert.deepEqual(runningHubParamValues(mergeRunningHubParams(store, setRunningHubParamValues("{}", model, { tags: "piano" })), model), { title: "Rain", tags: "piano" });
+    assert.deepEqual(runningHubParamValues("not json", model), {});
+});
+
+test("prompt-free tools and lip sync inputs are validated before submitting", () => {
+    assert.ok(runningHubPromptOptional(configFor("hitem3d-v15/model3d")));
+    assert.ok(runningHubPromptOptional(configFor("rhart-video/video-upscaler/video")));
+    assert.ok(!runningHubPromptOptional(configFor("suno/lyrics/text")));
+    assert.ok(!runningHubPromptOptional({ ...configFor("hitem3d-v15/model3d"), localChannels: [{ ...channel, protocol: "openai" as const }] }));
+    assert.equal(runningHubVideoInputError("kling-lip-sync/video", empty), "该模型需要参考视频");
+    assert.equal(runningHubVideoInputError("kling-lip-sync/video", { ...empty, videoReferences: [image] }), "");
+    assert.equal(runningHubVideoInputError("kling-lip-sync/video", { ...empty, videoReferences: [image], audioReferences: [image, image] }), "该模型最多支持 1 个参考音频");
+    assert.match(createRunningHubVoiceId(new Date("2026-09-13T08:09:10Z")), /^RH20260913080910[a-z0-9]{0,4}$/);
 });

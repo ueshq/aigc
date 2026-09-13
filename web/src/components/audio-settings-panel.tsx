@@ -8,12 +8,14 @@ import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, glmTtsFormatOptions, glmTtsVoiceOptions, isGlmTtsModel, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue, normalizeGlmTtsFormat, normalizeGlmTtsSpeed, normalizeGlmTtsVoice } from "@/lib/audio-generation";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsFormatOptions, mimoTtsVoiceOptions, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { normalizeRunningHubVoice, runningHubModelInfo } from "@/lib/runninghub";
-import type { AiConfig } from "@/stores/use-config-store";
+import { normalizeRunningHubVoice, parseRunningHubVoices, runningHubModelInfo } from "@/lib/runninghub";
+import { RunningHubParamsPanel } from "@/components/runninghub-params-panel";
+import { generateRunningHubLyrics } from "@/services/api/runninghub";
+import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 
 const speedOptions = ["0.75", "1", "1.25", "1.5"];
 
-export type AudioSettingKey = "audioVoice" | "audioFormat" | "audioSpeed" | "audioInstructions" | "glmTtsVoice" | "glmTtsFormat" | "glmTtsSpeed" | "mimoTtsVoice" | "mimoTtsFormat" | "mimoVoiceDesignPrompt" | "geminiTtsVoice";
+export type AudioSettingKey = "audioVoice" | "audioFormat" | "audioSpeed" | "audioInstructions" | "glmTtsVoice" | "glmTtsFormat" | "glmTtsSpeed" | "mimoTtsVoice" | "mimoTtsFormat" | "mimoVoiceDesignPrompt" | "geminiTtsVoice" | "runningHubParams";
 
 type AudioSettingsPanelProps = {
     config: AiConfig;
@@ -169,12 +171,15 @@ function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { con
     const info = runningHubModelInfo(model);
     const voice = normalizeRunningHubVoice(model, config.audioVoice);
     const speed = info?.speed;
+    // Voices from RunningHub voice clone/design only work with the MiniMax speech families.
+    const savedVoices = model.startsWith("minimax/speech-") ? parseRunningHubVoices(config.runningHubVoices) : [];
+    const hasSettings = Boolean(info?.voices || info?.voice || speed || info?.params?.length);
 
     return (
         <>
-            {!info?.voices && !info?.voice && !speed ? (
+            {!hasSettings ? (
                 <div className="text-xs leading-5" style={{ color: theme.node.muted }}>
-                    {info?.modes?.reference?.requires?.includes("audios") ? "需要连接一个 MP3 或 WAV 参考音频节点。" : "根据提示词生成音乐。"}
+                    {info?.modes?.reference?.requires?.includes("audios") ? "需要连接一个 MP3 或 WAV 参考音频节点。" : "根据提示词生成。"}
                 </div>
             ) : null}
             {info?.voices || info?.voice ? <SettingGroup title="声音" color={theme.node.muted}>
@@ -190,6 +195,20 @@ function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { con
                         onMouseDown={(event) => event.stopPropagation()}
                     />
                 )}
+                {savedVoices.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                        {savedVoices.map((item) => (
+                            <span key={item.id} className="inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs" style={{ borderColor: voice === item.id ? theme.node.text : theme.node.stroke, color: theme.node.text }}>
+                                <button type="button" title={item.id} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("audioVoice", item.id)}>
+                                    {item.name}
+                                </button>
+                                <button type="button" aria-label={`删除音色 ${item.name}`} className="opacity-60 hover:opacity-100" onMouseDown={(event) => event.stopPropagation()} onClick={() => useConfigStore.getState().updateConfig("runningHubVoices", JSON.stringify(savedVoices.filter((saved) => saved.id !== item.id)))}>
+                                    ×
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
             </SettingGroup> : null}
             {speed ? (
                 <SettingGroup title="语速" color={theme.node.muted}>
@@ -207,6 +226,7 @@ function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { con
                     />
                 </SettingGroup>
             ) : null}
+            <RunningHubParamsPanel model={model} value={config.runningHubParams} onChange={(value) => onConfigChange("runningHubParams", value)} theme={theme} onGenerateLyrics={(topic) => generateRunningHubLyrics(config, topic)} />
         </>
     );
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Box, Cpu, Image as ImageIcon, MessageSquare, Mic, Music2, Video, type LucideIcon } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { runningHubModelInfo } from "@/lib/runninghub";
 import { cn } from "@/lib/utils";
 import { filterModelsByCapability, normalizeLocalChannels, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
@@ -80,7 +81,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
                 title={current || placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current || placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{modelDisplayLabel(current, currentOption?.protocol) || current || placeholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -94,8 +95,8 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
             >
                 {options.length ? (
                     options.map((option) => (
-                        <SelectItem key={option.key} value={option.key} textValue={`${option.model} ${option.channelName}`}>
-                            <ModelLabel model={option.model} channelName={option.channelName} />
+                        <SelectItem key={option.key} value={option.key} textValue={`${modelDisplayLabel(option.model, option.protocol)} ${option.model} ${option.channelName}`}>
+                            <ModelLabel model={option.model} label={modelDisplayLabel(option.model, option.protocol)} channelName={option.channelName} />
                         </SelectItem>
                     ))
                 ) : (
@@ -108,11 +109,23 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
     );
 }
 
-function ModelLabel({ model, channelName }: { model: string; channelName?: string }) {
+/** RunningHub families show a readable name; the raw family stays visible as a subtitle. */
+function modelDisplayLabel(model: string, protocol?: string) {
+    return protocol === "runninghub" ? runningHubModelInfo(model)?.label || "" : "";
+}
+
+function ModelLabel({ model, label, channelName }: { model: string; label?: string; channelName?: string }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{model}</span>
+            {label ? (
+                <span className="min-w-0">
+                    <span className="block truncate">{label}</span>
+                    <span className="block truncate text-xs opacity-50">{model}</span>
+                </span>
+            ) : (
+                <span className="truncate">{model}</span>
+            )}
             {channelName ? <span className="ml-auto max-w-24 shrink-0 truncate text-xs opacity-50">{channelName}</span> : null}
         </span>
     );
@@ -120,8 +133,12 @@ function ModelLabel({ model, channelName }: { model: string; channelName?: strin
 
 function ModelIcon({ model }: { model: string }) {
     const icon = resolveModelIcon(model);
-    return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
+    if (icon) return <img src={icon} alt="" className="size-4 shrink-0 dark:invert" />;
+    const KindIcon = modelKindIcons[/\/(video|image|tts|music|text|model3d)$/.exec(model.trim())?.[1] || ""] || Cpu;
+    return <KindIcon className="size-4 shrink-0 opacity-70" />;
 }
+
+const modelKindIcons: Record<string, LucideIcon> = { video: Video, image: ImageIcon, tts: Mic, music: Music2, text: MessageSquare, model3d: Box };
 
 function resolveModelIcon(model: string) {
     const name = model.toLowerCase();

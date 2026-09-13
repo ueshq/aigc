@@ -16,12 +16,13 @@ export enum CanvasNodeType {
     Config = "config",
     Video = "video",
     Audio = "audio",
+    Model3D = "model3d",
     Director = "director",
     Group = "group",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
-export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
+export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "model3d";
 export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CameraControlOptions = {
@@ -64,6 +65,8 @@ export type CanvasNodeMetadata = {
     mimoVoiceDesignPrompt?: string;
     geminiTtsVoice?: string;
     mimoVoiceCloneAudioNodeId?: string;
+    /** JSON of RunningHub advanced parameters per model family, overriding the global values. */
+    runningHubParams?: string;
     references?: string[];
     naturalWidth?: number;
     naturalHeight?: number;

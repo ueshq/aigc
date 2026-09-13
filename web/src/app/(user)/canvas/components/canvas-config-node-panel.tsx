@@ -3,7 +3,7 @@
 import { buildGenerationConfig, videoConfigPatch } from "./canvas-node-generation";
 
 import type { CSSProperties } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Video } from "lucide-react";
+import { Box, Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Video } from "lucide-react";
 import { Button, Segmented } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -14,6 +14,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasCameraControl } from "./canvas-camera-control";
 import { CanvasAudioSettingsPopover } from "./canvas-audio-settings-popover";
+import { CanvasRunningHubParamsPopover } from "./canvas-runninghub-params-popover";
 import { CanvasVideoSettingsPopover, type CanvasVideoFrameOption, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "../types";
 
@@ -89,6 +90,15 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
                                     </span>
                                 ),
                             },
+                            {
+                                value: "model3d",
+                                label: (
+                                    <span className="inline-flex items-center gap-1">
+                                        <Box className="size-3.5" />
+                                        3D
+                                    </span>
+                                ),
+                            },
                         ]}
                     />
                 </div>
@@ -105,7 +115,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
                 </button>
             </div>
 
-            <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "image" || mode === "video" ? "grid-cols-[minmax(0,1fr)_148px_92px]" : mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "image" || mode === "video" ? "grid-cols-[minmax(0,1fr)_148px_92px]" : mode === "audio" || mode === "model3d" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} channelId={modelChannelId(config, mode)} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" hasReferenceMedia={videoResourceOptions.some((item) => item.kind !== "text")} frameOptions={videoFrameOptions} firstFrameNodeId={node.metadata?.firstFrameNodeId} lastFrameNodeId={node.metadata?.lastFrameNodeId} onFrameChange={(patch) => onConfigChange(node.id, patch)} onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
@@ -113,6 +123,8 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
                     <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} resourceOptions={videoResourceOptions} metadata={node.metadata} onMetadataChange={(patch) => onConfigChange(node.id, patch)} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, { [key]: value })} />
+                ) : mode === "model3d" ? (
+                    <CanvasRunningHubParamsPopover config={config} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onChange={(runningHubParams) => onConfigChange(node.id, { runningHubParams })} />
                 ) : null}
                 {mode === "image" || mode === "video" ? (
                     <CanvasCameraControl value={node.metadata?.cameraControl} onChange={(cameraControl) => onConfigChange(node.id, { cameraControl })} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" />
@@ -152,6 +164,7 @@ function modelChannelId(config: AiConfig, mode: CanvasGenerationMode) {
     if (mode === "image") return config.imageChannelId;
     if (mode === "video") return config.videoChannelId;
     if (mode === "text") return config.textChannelId;
+    if (mode === "model3d") return config.model3dChannelId;
     return config.audioChannelId || config.activeChannelId;
 }
 
@@ -159,5 +172,6 @@ function modePatch(config: AiConfig, mode: CanvasGenerationMode): Partial<Canvas
     if (mode === "image") return { generationMode: mode, model: config.imageModel, channelId: config.imageChannelId };
     if (mode === "video") return { generationMode: mode, model: config.videoModel, channelId: config.videoChannelId };
     if (mode === "text") return { generationMode: mode, model: config.textModel, channelId: config.textChannelId };
+    if (mode === "model3d") return { generationMode: mode, model: config.model3dModel, channelId: config.model3dChannelId };
     return { generationMode: mode, model: config.audioModel, channelId: config.audioChannelId || config.activeChannelId };
 }

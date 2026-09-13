@@ -376,7 +376,7 @@ func doAIRequest(request *http.Request, channel model.ModelChannel) ([]byte, int
 
 func transformVideoTaskPayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
 	if service.IsRunningHubChannel(channel) {
-		if result, ok := transformRunningHubVideoTaskResponse(payload); ok {
+		if result, ok := transformRunningHubVideoTaskResponse(payload, modelName); ok {
 			return result
 		}
 	}
