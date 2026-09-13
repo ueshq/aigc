@@ -435,7 +435,8 @@ func isImageModelName(modelName string) bool {
 }
 
 func isTextModelName(modelName string) bool {
-	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(modelName)), "/tts")
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !strings.HasSuffix(name, "/tts") && !strings.HasSuffix(name, "/music")
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {

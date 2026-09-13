@@ -145,7 +145,7 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         return { model, ...buildGeminiTtsRequest(config, prompt) };
     }
     if (isRunningHubConfig(config, model)) {
-        return { model, input: prompt, voice: normalizeRunningHubVoice(model, config.audioVoice), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)) };
+        return { model, input: prompt, voice: normalizeRunningHubVoice(model, config.audioVoice), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)), ...(referenceAudio ? { reference_audio: await referenceAudioDataUrl(referenceAudio) } : {}) };
     }
     if (isGlmTtsModel(model)) {
         if (prompt.length > 1024) throw new Error("GLM-TTS 文本不能超过 1024 个字符");

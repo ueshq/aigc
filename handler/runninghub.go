@@ -58,18 +58,22 @@ func readRunningHubInputs(body []byte, contentType string) (service.RunningHubIn
 	invalid := errors.New("RunningHub 请求格式无效")
 	if !strings.HasPrefix(contentType, "multipart/form-data") {
 		var request struct {
-			Prompt  string  `json:"prompt"`
-			Input   string  `json:"input"`
-			Size    string  `json:"size"`
-			Quality string  `json:"quality"`
-			Voice   string  `json:"voice"`
-			N       int     `json:"n"`
-			Speed   float64 `json:"speed"`
+			Prompt         string  `json:"prompt"`
+			Input          string  `json:"input"`
+			Size           string  `json:"size"`
+			Quality        string  `json:"quality"`
+			Voice          string  `json:"voice"`
+			ReferenceAudio string  `json:"reference_audio"`
+			N              int     `json:"n"`
+			Speed          float64 `json:"speed"`
 		}
 		if json.Unmarshal(body, &request) != nil {
 			return inputs, invalid
 		}
 		inputs.Prompt, inputs.Size, inputs.Quality, inputs.Voice, inputs.Count, inputs.Speed = firstNonEmpty(request.Prompt, request.Input), request.Size, request.Quality, request.Voice, request.N, request.Speed
+		if audio := strings.TrimSpace(request.ReferenceAudio); audio != "" {
+			inputs.Media["audios"] = []service.RunningHubMedia{{URL: audio}}
+		}
 		return inputs, nil
 	}
 	_, params, err := mime.ParseMediaType(contentType)
@@ -115,7 +119,7 @@ func completeRunningHubTask(w http.ResponseWriter, response *http.Response, chan
 	task, err := service.WaitRunningHubTask(channel, payload)
 	body, contentType := []byte(nil), "application/json"
 	if err == nil && logContext.Endpoint == "/audio/speech" {
-		body, contentType, err = service.DownloadRunningHubResult(task.URLs[0])
+		body, contentType, err = service.DownloadRunningHubResult(service.RunningHubAudioURL(task.URLs))
 	}
 	if err != nil {
 		if onFailure != nil {

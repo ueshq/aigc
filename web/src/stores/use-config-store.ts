@@ -202,9 +202,9 @@ function preferredModel(models: string[], predicate: (model: string) => boolean)
     return models.find(predicate) || "";
 }
 
-/** RunningHub family names end with their capability, e.g. kling-v3.0-pro/video or minimax/speech-2.6-hd/tts. */
+/** RunningHub family names end with their capability, e.g. kling-v3.0-pro/video, minimax/speech-2.6-hd/tts or suno-v5/single/music. */
 function modelKindSuffix(model: string) {
-    return /\/(video|image|tts)$/.exec(model.trim().toLowerCase())?.[1];
+    return /\/(video|image|tts|music)$/.exec(model.trim().toLowerCase())?.[1];
 }
 
 function isVideoModelName(model: string) {
@@ -295,7 +295,7 @@ function isImageModelName(model: string) {
 
 function isAudioModelName(model: string) {
     const kind = modelKindSuffix(model);
-    if (kind) return kind === "tts";
+    if (kind) return kind === "tts" || kind === "music";
     const value = model.toLowerCase();
     return value.includes("audio") || value.includes("tts") || value.includes("speech") || value.includes("voice") || value.includes("music") || value.includes("sound") || value.includes("elevenlabs") || value.includes("suno") || value.includes("lyrics") || value.includes("vocal") || value.includes("midi") || value.includes("wav");
 }

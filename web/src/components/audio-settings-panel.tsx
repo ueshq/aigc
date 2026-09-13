@@ -172,7 +172,12 @@ function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { con
 
     return (
         <>
-            <SettingGroup title="声音" color={theme.node.muted}>
+            {!info?.voices && !info?.voice && !speed ? (
+                <div className="text-xs leading-5" style={{ color: theme.node.muted }}>
+                    {info?.modes?.reference?.requires?.includes("audios") ? "需要连接一个 MP3 或 WAV 参考音频节点。" : "根据提示词生成音乐。"}
+                </div>
+            ) : null}
+            {info?.voices || info?.voice ? <SettingGroup title="声音" color={theme.node.muted}>
                 {info?.voices ? (
                     <Select className="w-full" showSearch optionFilterProp="label" value={voice} options={info.voices} onChange={(value) => onConfigChange("audioVoice", value)} />
                 ) : (
@@ -185,7 +190,7 @@ function RunningHubAudioSettings({ config, model, onConfigChange, theme }: { con
                         onMouseDown={(event) => event.stopPropagation()}
                     />
                 )}
-            </SettingGroup>
+            </SettingGroup> : null}
             {speed ? (
                 <SettingGroup title="语速" color={theme.node.muted}>
                     <input

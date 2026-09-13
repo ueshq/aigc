@@ -158,7 +158,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 `runninghub` 默认地址为国际站 `https://www.runninghub.ai/openapi/v2`，国内站为 `https://www.runninghub.cn/openapi/v2`，只填域名时自动补全 `/openapi/v2`。使用 Bearer API Key，标准模型 API 需要企业共享 Key。仅支持登录后经后端代理调用，未登录的浏览器直连会提示先登录。
 
-模型列表是内置的端点家族，名称以能力结尾：`<家族>/video`、`<家族>/image`、`<家族>/tts`，例如 `kling-v3.0-pro/video`、`seedream-v4.5/image`、`minimax/speech-2.6-hd/tts`。读取模型列表和渠道测试都不发起生成。家族内的具体端点由后端按本次输入自动选择：
+模型列表是内置的端点家族，名称以能力结尾：`<家族>/video`、`<家族>/image`、`<家族>/tts`、`<家族>/music`，例如 `kling-v3.0-pro/video`、`seedream-v4.5/image`、`minimax/speech-2.6-hd/tts`、`suno-v5/single/music`。读取模型列表和渠道测试都不发起生成。家族内的具体端点由后端按本次输入自动选择：
 
 | 能力 | 输入 | 端点 |
 | --- | --- | --- |
@@ -167,12 +167,18 @@ description: settings 表中 public 和 private 配置结构说明
 | 视频 | 参考图、参考视频、参考音频 | `reference-to-video`、`multimodal-video` 等 |
 | 图片 | 无参考图 / 有参考图 | `text-to-image` / `image-to-image`、`edit` |
 | 语音 | 文本 | 对应 TTS 端点 |
+| 视频工具 | 参考视频，动作控制另需首帧 | 编辑、延长、动作控制、超分、补帧、去字幕等，一个家族对应一个端点 |
+| 图片工具 | 参考图 | Topaz、HYPIR 放大等 |
+| 音乐 | 提示词，翻唱另需参考音频 | Suno、MiniMax 音乐 |
 
 - 视频沿用 `/api/v1/videos` 和后台任务轮询，查询改为 `POST /query`，约 5 秒一次。图片和语音由后端提交任务后等待完成，再返回 `data[].url` 或音频文件；等待上限为渠道超时，默认 600 秒。画布图片和音频任务同样适用。
 - 参数按端点 schema 映射：时长、分辨率、比例和尺寸取最接近的可选值，必填但未设置的参数使用 RunningHub 默认值，其余可选参数不发送。视频设置按当前输入模式展示该家族可用的清晰度、比例、时长和生成音频开关。
 - 本地文件或 Base64 素材先上传到 `POST /media/upload/binary`，公网 URL 直接透传。家族内没有端点能接受当前素材数量或组合时直接报错。
 - 语音音色：有固定列表的模型提供下拉选择，其余模型填写 RunningHub 音色 ID，留空使用模型默认音色。
-- 未接入视频编辑、延长、动作控制、口型、特效、放大、音乐和 3D 端点。
+- 纳入规则：端点要有提示词或素材输入，其余必填参数都有非文本默认值。口型、特效模板、翻译、3D、音色克隆与设计，以及输出文本的 Mureka、歌词类端点不接入。
+- 视频工具家族如 `rhart-video/video-upscaler/video`、`kling-video-o3-pro/video-edit/video`、`kling-v2.6-std/motion-control/video`，在视频创作台和画布中用参考视频驱动；创作台仍要求填写提示词，不需要提示词的工具会忽略它。
+- 音乐家族在画布音频节点使用；`minimax/music-cover/music` 需要连接一个 MP3 或 WAV 参考音频节点。歌词参数未接入，只发送提示词。
+- 真实接口验收：`RUNNINGHUB_LIVE=1 go test ./service -run TestRunningHubLive -v -count=1 -timeout 40m`，读取 `.env/runninghub.env`，每种能力只提交一个最低价请求；普通 `go test ./...` 会跳过。
 - 文本对话请另建 OpenAI 协议渠道，Base URL 选择预设“RunningHub LLM”，即 `https://llm.runninghub.ai/v1`。
 
 模型目录由 `scripts/runninghub-registry.mjs` 从官方 [ComfyUI_RH_OpenAPI](https://github.com/HM-RunningHub/ComfyUI_RH_OpenAPI) 的 `models_registry.json` 生成 `service/runninghub_registry.json` 和 `web/src/lib/runninghub-models.ts`。官方新增模型后重新运行：

@@ -24,7 +24,7 @@ func TestRunningHubRegistryFamilies(t *testing.T) {
 	}
 	for name, modes := range runningHubRegistry().Families {
 		kind := name[strings.LastIndex(name, "/")+1:]
-		if kind != "video" && kind != "image" && kind != "tts" || len(modes) == 0 {
+		if kind != "video" && kind != "image" && kind != "tts" && kind != "music" || len(modes) == 0 {
 			t.Errorf("family %q needs a capability suffix and modes", name)
 		}
 		for mode, endpoints := range modes {
@@ -60,6 +60,14 @@ func TestSelectRunningHubEndpoint(t *testing.T) {
 		{"image edit", "seedream-v4.5/image", map[string][]RunningHubMedia{"images": urls(2)}, "seedream-v4.5/image-to-image", ""},
 		{"edit-only image", "higgsfield/soul/image", nil, "", "该模型需要参考图"},
 		{"speech", "minimax/speech-2.6-hd/tts", nil, "rhart-audio/text-to-audio/speech-2.6-hd", ""},
+		{"frame-only video needs a first frame", "higgsfield/dop/video", nil, "", "该模型需要首帧"},
+		{"video tool", "rhart-video/video-upscaler/video", map[string][]RunningHubMedia{"videos": urls(1)}, "rhart-video/video-upscaler", ""},
+		{"video tool needs a video", "rhart-video/video-upscaler/video", nil, "", "该模型需要参考视频"},
+		{"motion control needs a character image", "kling-v2.6-std/motion-control/video", map[string][]RunningHubMedia{"videos": urls(1)}, "", "该模型需要首帧"},
+		{"motion control", "kling-v2.6-std/motion-control/video", map[string][]RunningHubMedia{"first": urls(1), "videos": urls(1)}, "kling-v2.6-std/motion-control", ""},
+		{"music", "suno-v5/single/music", nil, "rhart-audio/suno-v5/single", ""},
+		{"music cover needs audio", "minimax/music-cover/music", nil, "", "该模型需要参考音频"},
+		{"music cover", "minimax/music-cover/music", map[string][]RunningHubMedia{"audios": urls(1)}, "minimax/music-cover", ""},
 		{"unknown family", "kling-v3.0-pro", nil, "", "RunningHub 暂不支持模型 kling-v3.0-pro"},
 	}
 	for _, test := range tests {
@@ -92,6 +100,9 @@ func TestBuildRunningHubPayload(t *testing.T) {
 		{"pixel image size", "seedream-v4.5/image-to-image", RunningHubInputs{Prompt: "cat", Size: "1536x1024", Media: images}, `{"prompt":"cat","width":1536,"height":1024,"imageUrls":["https://media.example/a.png","https://media.example/b.png"]}`},
 		{"image ratio and level", "rhart-image-n-pro/text-to-image", RunningHubInputs{Prompt: "cat", Size: "836x1254"}, `{"prompt":"cat","aspectRatio":"2:3","resolution":"1k"}`},
 		{"image size list and count", "alibaba/qwen-image-2.0/text-to-image", RunningHubInputs{Prompt: "cat", Size: "1024x1536", Count: 2}, `{"prompt":"cat","size":"1024*1536","imageNum":"2"}`},
+		{"video tool resolution", "rhart-video/video-upscaler", RunningHubInputs{Prompt: "ignored", Resolution: "2k", Media: map[string][]RunningHubMedia{"videos": {{URL: "https://media.example/a.mp4"}}}}, `{"videoUrl":"https://media.example/a.mp4","targetResolution":"2k"}`},
+		{"music description", "rhart-audio/suno-v5/single", RunningHubInputs{Prompt: "calm piano"}, `{"description":"calm piano"}`},
+		{"music cover audio", "minimax/music-cover", RunningHubInputs{Prompt: "jazz", Media: map[string][]RunningHubMedia{"audios": {{URL: "https://media.example/a.mp3"}}}}, `{"prompt":"jazz","audioUrl":"https://media.example/a.mp3"}`},
 		{"speech defaults", "rhart-audio/text-to-audio/speech-2.6-hd", RunningHubInputs{Prompt: "你好", Speed: 3}, `{"text":"你好","voice_id":"Wise_Woman","speed":2,"enable_base64_output":false,"english_normalization":false}`},
 		{"speech voice", "rhart-audio/text-to-audio/speech-2.6-hd", RunningHubInputs{Prompt: "hello", Voice: "Calm_Woman", Speed: 1.25}, `{"text":"hello","voice_id":"Calm_Woman","speed":1.25,"enable_base64_output":false,"english_normalization":false}`},
 	}
@@ -131,6 +142,16 @@ func TestParseRunningHubTask(t *testing.T) {
 				t.Fatalf("got %+v, %v", task, ok)
 			}
 		})
+	}
+}
+
+func TestRunningHubAudioURL(t *testing.T) {
+	urls := []string{"https://cdn.example/cover.jpg", "https://cdn.example/song.mp3?sign=1"}
+	if got := RunningHubAudioURL(urls); got != urls[1] {
+		t.Fatalf("got %q", got)
+	}
+	if got := RunningHubAudioURL(urls[:1]); got != urls[0] {
+		t.Fatalf("fallback got %q", got)
 	}
 }
 

@@ -15,6 +15,8 @@ test("family names are classified by their capability suffix", () => {
     assert.ok(modelMatchesCapability("minimax/speech-2.6-hd/tts", "audio"));
     assert.ok(!modelMatchesCapability("minimax/speech-2.6-hd/tts", "video"));
     assert.ok(!modelMatchesCapability("kling-v3.0-pro/video", "text"));
+    assert.ok(modelMatchesCapability("minimax/music-cover/music", "audio"));
+    assert.ok(!modelMatchesCapability("minimax/music-cover/music", "video"));
 });
 
 test("video options follow the endpoints serving each reference mode", () => {
@@ -45,7 +47,10 @@ test("input validation mirrors backend endpoint selection", () => {
     assert.equal(runningHubVideoInputError("kling-v3.0-pro/video", { ...empty, firstFrame: image, audioReferences: [image] }), "该模型使用首尾帧时不支持参考音频");
     assert.equal(runningHubVideoInputError("rhart-video-v3.1-lite/video", { ...empty, firstFrame: image }), "");
     assert.equal(runningHubVideoInputError("rhart-video-v3.1-lite/video", { ...empty, references: [image, image, image, image] }), "该模型最多支持 3 个参考图片");
-    assert.equal(runningHubVideoInputError("higgsfield/dop/video", empty), "该模型不支持纯文本生成，请添加首帧或参考素材");
+    assert.equal(runningHubVideoInputError("higgsfield/dop/video", empty), "该模型需要首帧");
+    assert.equal(runningHubVideoInputError("rhart-video/video-upscaler/video", empty), "该模型需要参考视频");
+    assert.equal(runningHubVideoInputError("rhart-video/video-upscaler/video", { ...empty, videoReferences: [image] }), "");
+    assert.equal(runningHubVideoInputError("kling-v2.6-std/motion-control/video", { ...empty, videoReferences: [image] }), "该模型需要首帧");
 });
 
 test("TTS voices stay valid for the selected model", () => {

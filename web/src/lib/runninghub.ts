@@ -4,6 +4,7 @@ import { channelProtocolForConfig, type AiConfig } from "@/stores/use-config-sto
 
 export const RUNNINGHUB_CHANNEL_PROTOCOL = "runninghub" as const;
 export type RunningHubVideoMode = "text" | "frames" | "reference";
+export type RunningHubMediaUse = "first" | "last" | "images" | "videos" | "audios";
 export type RunningHubModeCaps = {
     durations?: number[] | { min: number; max: number };
     duration?: number;
@@ -17,6 +18,8 @@ export type RunningHubModeCaps = {
     audios?: number;
     lastFrame?: boolean;
     audio?: boolean;
+    /** Media every endpoint of the mode requires. */
+    requires?: RunningHubMediaUse[];
 };
 export type RunningHubModelInfo = {
     modes?: Partial<Record<RunningHubVideoMode | "edit", RunningHubModeCaps>>;
@@ -26,7 +29,9 @@ export type RunningHubModelInfo = {
 };
 type RunningHubVideoInputs = { references: unknown[]; videoReferences: unknown[]; audioReferences: unknown[]; firstFrame?: unknown; lastFrame?: unknown };
 
-/** RunningHub endpoint families named `<family>/video`, `<family>/image` or `<family>/tts`; the backend picks the endpoint per request. */
+const mediaLabels: Record<RunningHubMediaUse, string> = { first: "首帧", last: "尾帧", images: "参考图片", videos: "参考视频", audios: "参考音频" };
+
+/** RunningHub endpoint families named `<family>/video`, `<family>/image`, `<family>/tts` or `<family>/music`; the backend picks the endpoint per request. */
 export const runningHubModels = Object.keys(runningHubModelCatalog);
 
 export function runningHubModelInfo(model?: string): RunningHubModelInfo | undefined {
@@ -54,6 +59,9 @@ export function runningHubVideoInputError(model: string, input: RunningHubVideoI
     const images = input.references.length + (foldFrames ? frames : 0);
     const mode: RunningHubVideoMode = frames && !foldFrames ? "frames" : images || input.videoReferences.length || input.audioReferences.length ? "reference" : "text";
     const caps = modes[mode];
+    const provided: Record<RunningHubMediaUse, number> = { first: mode === "frames" && input.firstFrame ? 1 : 0, last: mode === "frames" && input.lastFrame ? 1 : 0, images, videos: input.videoReferences.length, audios: input.audioReferences.length };
+    const missing = (caps || (mode === "text" ? modes.frames || modes.reference : undefined))?.requires?.find((use) => !provided[use]);
+    if (missing) return `该模型需要${mediaLabels[missing]}`;
     if (!caps) return { text: "该模型不支持纯文本生成，请添加首帧或参考素材", frames: "该模型不支持首尾帧", reference: "该模型不支持参考素材" }[mode];
     if (input.lastFrame && mode === "frames" && !caps.lastFrame) return "该模型不支持尾帧";
     const counts = [[images, caps.images, "参考图片"], [input.videoReferences.length, caps.videos, "参考视频"], [input.audioReferences.length, caps.audios, "参考音频"]] as const;

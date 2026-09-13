@@ -118,6 +118,11 @@ func TestModelProtocolProxyPreparationOrder(t *testing.T) {
 			body: `{"model":"higgsfield/soul/image","prompt":"cat"}`, wantPath: "/images/generations", wantLabel: "RunningHub", wantError: "该模型需要参考图",
 		},
 		{
+			name: "RunningHub music cover reads reference audio", protocol: "runninghub", model: "minimax/music-cover/music", endpoint: "/audio/speech",
+			body:     `{"model":"minimax/music-cover/music","input":"jazz","speed":1,"reference_audio":"https://media.example/a.mp3"}`,
+			wantPath: "/minimax/music-cover", wantLabel: "RunningHub", wantBody: `{"prompt":"jazz","audioUrl":"https://media.example/a.mp3"}`,
+		},
+		{
 			name: "compatible passthrough", protocol: "unknown", model: "future-model", endpoint: "/chat/completions", body: `not JSON`,
 			wantPath: "/chat/completions", wantBody: `not JSON`,
 		},

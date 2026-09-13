@@ -34,6 +34,7 @@ import { applyCameraPrompt } from "../utils/canvas-camera";
 import { GROUP_PADDING, findContainingGroupId, findGroupDropTarget, getNodeBounds, snapNodesIntoGroup } from "../utils/canvas-group";
 import { App, Button, Dropdown, Modal, Slider } from "antd";
 import { isMimoVoiceCloneModel } from "@/lib/mimo-tts";
+import { runningHubModelInfo } from "@/lib/runninghub";
 import { isGlmTtsModel } from "@/lib/audio-generation";
 import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
@@ -5084,7 +5085,9 @@ function buildAudioGenerationMetadata(config: AiConfig, sourceMetadata?: CanvasN
 }
 
 function selectMiMoVoiceCloneReference(config: AiConfig, metadata: CanvasNodeMetadata | undefined, references: ReferenceAudio[]) {
-    if (!isMimoVoiceCloneModel(config.model || config.audioModel)) return undefined;
+    const model = config.model || config.audioModel;
+    // RunningHub music covers also need exactly one connected reference audio.
+    if (!isMimoVoiceCloneModel(model) && !runningHubModelInfo(model)?.modes?.reference?.requires?.includes("audios")) return undefined;
     const selectedId = metadata?.mimoVoiceCloneAudioNodeId || "";
     if (selectedId) {
         const selected = references.find((item) => item.id === selectedId);

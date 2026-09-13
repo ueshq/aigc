@@ -4,7 +4,7 @@
  *   node scripts/runninghub-registry.mjs path/to/models_registry.json
  * Source: https://github.com/HM-RunningHub/ComfyUI_RH_OpenAPI/blob/main/models_registry.json
  *
- * Endpoints are grouped into families named `<family>/video`, `<family>/image` or `<family>/tts`.
+ * Endpoints are grouped into families named `<family>/video`, `<family>/image`, `<family>/tts` or `<family>/music`.
  * The backend picks the family endpoint that fits the request inputs; the frontend reads per-mode options.
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -15,39 +15,43 @@ if (!source) throw new Error("usage: node scripts/runninghub-registry.mjs <model
 const root = fileURLToPath(new URL("..", import.meta.url));
 const models = JSON.parse(readFileSync(source, "utf8"));
 
-const excluded = /edit-video|video-edit|extend|extension|motion|lip|effect|upscal|translat|erase|world|character|element|fps|restyl|draft|dreamactor|avatar|lora|video-to-video|continuation|regeneration|deprecated|asyn|upload|enhance|topaz|hypir|marble|context-ir|-star/i;
+// Multi-step or template workflows, account utilities and text outputs that the creation UIs cannot express.
+const excluded = /lip|effect|translat|-star|world|marble|character|element|draft|dreamactor|lora|regeneration|deprecated|asyn|upload|context-ir|voice-clone|voice-design|identify|lyrics|describe|recognize|stem|preprocess|mureka/i;
 const aliases = { "vidu/text-to-video": "vidu/q2" };
-const modeTokens = [
-    ["text", /(^|-)(text-to-video|t2v|text-to-image)(?=-|$)/],
-    ["frames", /(^|-)(image-to-video|i2v|start-end-to-video|start-to-end|transition)(?=-|$)/],
-    ["reference", /(^|-)(reference-to-video|refrence-to-video|multimodal-video|multimodal-to-video|omni-reference)(?=-|$)/],
-    ["edit", /(^|-)(image-to-image|image-edit|edit)(?=-|$)/],
-];
+const modeTokens = {
+    video: [
+        ["text", /(^|-)(text-to-video|t2v)(?=-|$)/],
+        ["frames", /(^|-)(image-to-video|i2v|start-end-to-video|start-to-end|transition)(?=-|$)/],
+        ["reference", /(^|-)(reference-to-video|refrence-to-video|multimodal-video|multimodal-to-video|omni-reference)(?=-|$)/],
+    ],
+    image: [
+        ["text", /(^|-)text-to-image(?=-|$)/],
+        ["edit", /(^|-)(image-to-image|image-edit|edit)(?=-|$)/],
+    ],
+};
 const mediaUses = ["first", "last", "images", "videos", "audios"];
 const standardRatios = ["21:9", "2:1", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "1:2", "9:21"];
 const standardLevels = [360, 480, 540, 720, 768, 1080, 1440, 2160];
 
 function modelKind(model) {
-    const keys = new Set(model.params.map((param) => param.fieldKey));
-    const endpoint = model.endpoint;
-    if (/^rhart-audio\/text-to-audio\/speech-|^alibaba\/qwen3-tts|^bytedance\/doubao-seed-tts/.test(endpoint)) return "tts";
-    if (!["image", "video"].includes(model.output_type) || excluded.test(endpoint) || !keys.has("prompt")) return "";
-    return model.output_type;
+    if (/^rhart-audio\/text-to-audio\/speech-|^alibaba\/qwen3-tts|^bytedance\/doubao-seed-tts/.test(model.endpoint)) return "tts";
+    return excluded.test(model.endpoint) ? "" : { image: "image", video: "video", audio: "music" }[model.output_type] || "";
 }
 
 function familyName(endpoint, kind) {
     if (kind === "tts") return `${endpoint.replace("rhart-audio/text-to-audio/", "minimax/").replace(/^(alibaba|bytedance)\//, "")}/tts`;
+    if (kind === "music") return `${endpoint.replace("rhart-audio/text-to-audio/", "minimax/").replace(/^rhart-audio\//, "")}/music`;
     if (aliases[endpoint]) return `${aliases[endpoint]}/${kind}`;
     const segments = endpoint.split("/");
     let last = segments.pop();
-    for (const [, pattern] of modeTokens) last = last.replace(pattern, "");
+    for (const [, pattern] of modeTokens[kind]) last = last.replace(pattern, "");
     last = last.replace(/--+/g, "-").replace(/^-|-$/g, "");
-    return [...segments, ...(last ? [last] : []), kind].join("/");
+    return [...segments, ...(last && last !== kind ? [last] : []), kind].join("/");
 }
 
-function tokenMode(endpoint) {
+function tokenMode(endpoint, kind) {
     const last = endpoint.split("/").pop();
-    return modeTokens.find(([, pattern]) => pattern.test(last))?.[0] || "";
+    return (modeTokens[kind] || []).find(([, pattern]) => pattern.test(last))?.[0] || "";
 }
 
 const parseDims = (value) => {
@@ -61,17 +65,19 @@ function paramUse(kind, param) {
     if (param.type === "IMAGE") {
         if (["firstImageUrl", "firstFrameUrl"].includes(key)) return "first";
         if (["lastImageUrl", "lastFrameUrl", "endImageUrl"].includes(key)) return "last";
-        if (["imageUrls", "referenceImages", "keyframes"].includes(key)) return "images";
+        if (["imageUrls", "referenceImages", "keyframes", "referenceImageUrl"].includes(key)) return "images";
         if (["imageUrl", "image"].includes(key)) return kind === "video" ? "first" : "images";
         return "";
     }
-    if (param.type === "VIDEO") return ["videoUrls", "videoUrl", "videos"].includes(key) ? "videos" : "";
-    if (param.type === "AUDIO") return ["audioUrls", "audioUrl"].includes(key) ? "audios" : "";
-    if (["prompt", "text"].includes(key) && param.type === "STRING") return "prompt";
+    if (param.type === "VIDEO") return ["videoUrls", "videoUrl", "videos", "video", "startVideo"].includes(key) ? "videos" : "";
+    if (param.type === "AUDIO") return ["audioUrls", "audioUrl", "audio"].includes(key) ? "audios" : "";
+    if (["prompt", "text", "description"].includes(key) && param.type === "STRING") return "prompt";
+    if (kind === "music") return "";
     if (kind === "tts") return ["voice_id", "voice", "speaker"].includes(key) ? "voice" : key === "speed" && param.type === "FLOAT" ? "speed" : "";
     if (key === "duration" && kind === "video") return "duration";
     if (["size", "resolution", "aspectRatio", "ratio"].includes(key) && dims) return "size";
     if (key === "resolution") return kind === "video" ? "resolution" : "level";
+    if (key === "targetResolution" && kind === "video") return "resolution";
     if (["aspectRatio", "ratio"].includes(key)) return "ratio";
     if (kind === "image" && ["width", "height"].includes(key) && param.type === "INT") return key;
     if (kind === "image" && key === "quality") return "quality";
@@ -121,7 +127,7 @@ function ratioLabel(value) {
     return dims ? nearest(standardRatios, dims[0] / dims[1], (ratio, target) => logDistance(ratioValue(ratio), target)) : "";
 }
 
-function videoModeCaps(endpointParams) {
+function videoOptions(endpointParams) {
     const find = (use) => endpointParams.flat().find((param) => param.use === use);
     const caps = {};
     const duration = find("duration");
@@ -132,21 +138,25 @@ function videoModeCaps(endpointParams) {
         if ((duration.options || []).map(String).includes("-1")) caps.auto = -1;
     }
     if (Number(duration?.default) > 0) caps.duration = Number(duration.default);
-    const resolution = find("resolution");
-    const ratio = find("ratio");
-    const size = find("size");
-    const levelSource = resolution || size;
+    const levelSource = find("resolution") || find("size");
     const resolutions = unique((levelSource?.options || []).map(levelLabel));
     if (resolutions.length) Object.assign(caps, { resolutions, resolution: levelLabel(levelSource.default) || resolutions[0] });
-    const ratioSource = ratio || size;
+    const ratioSource = find("ratio") || find("size");
     const ratios = unique((ratioSource?.options || []).map(ratioLabel));
     if (ratios.length) Object.assign(caps, { ratios, ratio: ratioLabel(ratioSource.default) || ratios[0] });
+    if (endpointParams.some((params) => params.some((param) => param.use === "audio"))) caps.audio = true;
+    return caps;
+}
+
+function modeCaps(kind, endpointParams) {
+    const caps = kind === "video" ? videoOptions(endpointParams) : {};
     for (const use of ["images", "videos", "audios"]) {
         const limit = Math.max(0, ...endpointParams.map((params) => params.filter((param) => param.use === use).reduce((sum, param) => sum + param.limit, 0)));
         if (limit) caps[use] = limit;
     }
     if (endpointParams.some((params) => params.some((param) => param.use === "last"))) caps.lastFrame = true;
-    if (endpointParams.some((params) => params.some((param) => param.use === "audio"))) caps.audio = true;
+    const requires = mediaUses.filter((use) => endpointParams.every((params) => params.some((param) => param.use === use && param.required)));
+    if (requires.length) caps.requires = requires;
     return caps;
 }
 
@@ -156,30 +166,30 @@ const sourceParams = {};
 for (const model of [...models].sort((a, b) => a.endpoint.localeCompare(b.endpoint))) {
     const kind = modelKind(model);
     if (!kind) continue;
-    const params = model.params.map((param) => registryParam(kind, param)).filter((param) => param.use || param.required);
-    endpoints[model.endpoint] = params;
+    const params = model.params.map((param) => registryParam(kind, param));
+    // Keep endpoints the UI can drive: a prompt or media input, and every other required field has a non-text default.
+    const expressible = params.some((param) => param.use === "prompt" || mediaUses.includes(param.use));
+    const blocked = model.params.some((param, index) => param.required && !params[index].use && (param.defaultValue === undefined || param.type === "STRING"));
+    if (!expressible || blocked) continue;
+    endpoints[model.endpoint] = params.filter((param) => param.use || param.required);
     sourceParams[model.endpoint] = model.params;
     const family = (families[familyName(model.endpoint, kind)] ||= {});
-    for (const mode of endpointModes(kind, params)) (family[mode] ||= []).push(model.endpoint);
-}
-for (const modes of Object.values(families)) {
-    for (const [mode, list] of Object.entries(modes)) list.sort((a, b) => Number(tokenMode(b) === mode) - Number(tokenMode(a) === mode));
+    for (const mode of endpointModes(kind, endpoints[model.endpoint])) (family[mode] ||= []).push(model.endpoint);
 }
 
 const catalog = {};
 for (const [name, modes] of Object.entries(families)) {
     const kind = name.split("/").pop();
-    if (kind === "tts") {
-        const params = endpoints[modes.text[0]];
-        const voice = params.find((param) => param.use === "voice");
-        const speed = params.find((param) => param.use === "speed");
-        const voiceSource = sourceParams[modes.text[0]].find((param) => param.fieldKey === voice?.key);
-        catalog[name] = { ...(voice?.type === "LIST" ? { voices: voiceSource.options.map((option) => ({ value: option.value, label: String(option.description || option.value).split("·")[0] })) } : {}), ...(voice?.default ? { voice: voice.default } : {}), ...(speed ? { speed: { min: speed.min ?? 0.5, max: speed.max ?? 2 } } : {}) };
-    } else if (kind === "image") {
-        catalog[name] = { modes: Object.fromEntries(Object.entries(modes).map(([mode, list]) => [mode, mode === "edit" ? { images: Math.max(...list.map((endpoint) => endpoints[endpoint].filter((param) => param.use === "images").reduce((sum, param) => sum + param.limit, 0))) } : {}])) };
-    } else {
-        catalog[name] = { modes: Object.fromEntries(Object.entries(modes).map(([mode, list]) => [mode, videoModeCaps(list.map((endpoint) => endpoints[endpoint]))])) };
+    for (const [mode, list] of Object.entries(modes)) list.sort((a, b) => Number(tokenMode(b, kind) === mode) - Number(tokenMode(a, kind) === mode));
+    if (kind !== "tts") {
+        catalog[name] = { modes: Object.fromEntries(Object.entries(modes).map(([mode, list]) => [mode, modeCaps(kind, list.map((endpoint) => endpoints[endpoint]))])) };
+        continue;
     }
+    const params = endpoints[modes.text[0]];
+    const voice = params.find((param) => param.use === "voice");
+    const speed = params.find((param) => param.use === "speed");
+    const voiceSource = sourceParams[modes.text[0]].find((param) => param.fieldKey === voice?.key);
+    catalog[name] = { ...(voice?.type === "LIST" ? { voices: voiceSource.options.map((option) => ({ value: option.value, label: String(option.description || option.value).split("·")[0] })) } : {}), ...(voice?.default ? { voice: voice.default } : {}), ...(speed ? { speed: { min: speed.min ?? 0.5, max: speed.max ?? 2 } } : {}) };
 }
 
 const lines = (object) => `{\n${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${JSON.stringify(object[key])}`).join(",\n")}\n}`;

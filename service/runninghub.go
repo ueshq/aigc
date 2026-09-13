@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,8 @@ const ModelChannelProtocolRunningHub = "runninghub"
 //
 //go:embed runninghub_registry.json
 var runningHubRegistryJSON []byte
+
+var runningHubMediaLabels = map[string]string{"first": "首帧", "last": "尾帧", "images": "参考图", "videos": "参考视频", "audios": "参考音频"}
 
 // runningHubPollInterval follows the RunningHub API contract's 5-second polling guidance.
 var runningHubPollInterval = 5 * time.Second
@@ -79,7 +82,7 @@ type RunningHubInputs struct {
 	Voice         string
 	Count         int
 	Speed         float64
-	Media         map[string][]RunningHubMedia // keyed by first, last, images, videos or audios
+	Media         map[string][]RunningHubMedia // keyed by runningHubMediaLabels roles
 }
 
 type RunningHubTask struct {
@@ -132,11 +135,20 @@ func SelectRunningHubEndpoint(modelName string, media map[string][]RunningHubMed
 			return endpoint, nil
 		}
 	}
-	switch {
-	case len(modes[mode]) > 0:
+	// Name the missing required media: of the chosen mode, or of any mode when only a prompt was given.
+	candidates := modes[mode]
+	if mode == "text" {
+		candidates = append(append(append([]string{}, modes["frames"]...), modes["reference"]...), modes["edit"]...)
+	}
+	for _, endpoint := range candidates {
+		for _, param := range runningHubRegistry().Endpoints[endpoint] {
+			if label := runningHubMediaLabels[param.Use]; label != "" && param.Required && len(media[param.Use]) == 0 {
+				return "", errors.New("该模型需要" + label)
+			}
+		}
+	}
+	if len(modes[mode]) > 0 {
 		return "", fmt.Errorf("素材数量或组合不符合该模型要求：首帧 %d、尾帧 %d、参考图 %d、参考视频 %d、参考音频 %d", len(media["first"]), len(media["last"]), len(media["images"]), len(media["videos"]), len(media["audios"]))
-	case mode == "text" && strings.HasSuffix(modelName, "/image"):
-		return "", errors.New("该模型需要参考图")
 	}
 	return "", errors.New(map[string]string{"text": "该模型不支持纯文本生成，请添加首帧或参考素材", "frames": "该模型不支持首尾帧", "reference": "该模型不支持参考素材", "edit": "该模型不支持参考图"}[mode])
 }
@@ -144,13 +156,13 @@ func SelectRunningHubEndpoint(modelName string, media map[string][]RunningHubMed
 func runningHubEndpointFits(params []runningHubParam, media map[string][]RunningHubMedia) bool {
 	capacity := map[string]int{}
 	for _, param := range params {
-		switch param.Use {
-		case "first", "last", "images", "videos", "audios":
-			if param.Required && len(media[param.Use]) == 0 {
-				return false
-			}
-			capacity[param.Use] += max(param.Limit, 1)
+		if runningHubMediaLabels[param.Use] == "" {
+			continue
 		}
+		if param.Required && len(media[param.Use]) == 0 {
+			return false
+		}
+		capacity[param.Use] += max(param.Limit, 1)
 	}
 	for use, items := range media {
 		if len(items) > capacity[use] {
@@ -546,6 +558,17 @@ func UploadRunningHubMedia(channel model.ModelChannel, media RunningHubMedia) (s
 		return "", fmt.Errorf("RunningHub 素材上传失败：%s", firstVideoTaskValue(result.Message, result.Msg, strconv.Itoa(response.StatusCode)))
 	}
 	return result.Data.DownloadURL, nil
+}
+
+// RunningHubAudioURL picks the first audio result, since music tasks also return cover images.
+func RunningHubAudioURL(urls []string) string {
+	for _, url := range urls {
+		switch strings.ToLower(path.Ext(strings.Split(url, "?")[0])) {
+		case ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus":
+			return url
+		}
+	}
+	return urls[0]
 }
 
 // DownloadRunningHubResult fetches a result file, such as TTS audio returned by the proxy as bytes.
